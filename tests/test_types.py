@@ -18,6 +18,10 @@ from scityping.pint import PintUnit, PintValue
 
 def test_numpy(caplog):
 
+    arr = np.arange(3, dtype='uint32')
+    arr2 = Array.validate(Array.json_encoder(arr))
+    assert repr(arr) == repr(arr2)  # Check that they match exactly, including dtype
+
     class Model(BaseModel):
         a: float
         # dt: float=0.01
@@ -329,6 +333,3 @@ def test_torch():
         assert a.shape == b.shape
         assert a.dtype == b.dtype
         assert (a == b).all()
-
-# test_numpy(None)
-test_rng()

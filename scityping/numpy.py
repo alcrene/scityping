@@ -71,14 +71,26 @@ def get_dtype(T: Any) -> np.dtype:
 
 @ABCSerializable.register  # NB: It is not permitted to subclass `np.dtype`
 class DType(Serializable):
+    """
+    Validator also accepts `str` and scalar types (int, np.float32, etc.).
+    """
     class Data(SerializedData):
         desc: str
         def encode(dtype): return str(dtype)
         def decode(data): return np.dtype(data.desc)  # Required since we don’t subclass `np.dtype`
+
     # # TODO
     # @classmethod
     # def __modify_schema__(cls, field_schema):
     #     field_schema.update(type="str")
+
+    @classmethod
+    def validate(cls, value, field=None):
+        # Following works with any NumPy, but also plain types like int or str
+        if isinstance(value, type) and np.issubdtype(value, np.generic):
+            return np.dtype(value)
+        else:
+            return super().validate(value, field=field)
 
 # Because the name 'DType' doesn't match the class we want to make serializable
 # (in fact we want to make many classes serializable), we update the registry manually
@@ -369,12 +381,13 @@ class _ArrayType(Serializable, np.ndarray):
         encoding = "b85"
         threshold = 100
         @classmethod
-        def encode(cls, array):
+        def encode(cls, array, compression=None, encoding=None, threshold=None):
             if array.size <= cls.threshold:
-                return ListArrayData.encode(array)
+                return {"data": ListArrayData.encode(array)}
             else:
-                return CompressedArrayData.encode(
-                    array, cls.compression, cls.encoding, cls.threshold)
+                return {"data": CompressedArrayData.encode(
+                    array, compression or cls.compression, encoding or cls.encoding,
+                    threshold if threshold is not None else cls.threshold)}
         @staticmethod
         def decode(data):
             return data.data.decode(data.data)
@@ -405,7 +418,10 @@ class _ArrayType(Serializable, np.ndarray):
             # recognizes `Array` as a type it can deserialize, just so we can
             # reuse super().validate, we just do the deserialization here.
             serialized_cls = cls._registry[value[0]]
-            value = serialized_cls.Data.decode(cls.Data(**value[1]))
+            data = value[1]
+            if not isinstance(data, serialized_cls.Data):
+                data = serialized_cls.Data(**data)
+            value = serialized_cls.Data.decode(data)
             return cls.validate(value)  # Still validate with `cls`: typically `seralized_cls` is *less* specific, like unspecified `Array°
 
         elif isinstance(value, np.ndarray):
@@ -420,9 +436,6 @@ class _ArrayType(Serializable, np.ndarray):
                 nptype = infer_numpy_type_to_cast(cls.nptype, value)
                 result = value.astype(nptype)
             else:
-                # # FIXME (Remove): Temporary test because we removed casting of strings
-                # if np.issubdtype(value.dtype, np.dtype(str)):
-                #     logger.error("We removed the option to cast arrays from string. Please check if this is still needed.")
                 raise TypeError(f"Cannot safely cast '{field.name}' (dtype:  "
                                 f"{value.dtype}) to type {cls.nptype}.")
         else:
@@ -451,9 +464,6 @@ class _ArrayType(Serializable, np.ndarray):
                 nptype = infer_numpy_type_to_cast(cls.nptype, value)
                 result = value.astype(nptype)
             else:
-                # # FIXME (Remove): Temporary test because we removed casting of strings
-                # if np.issubdtype(value.dtype, np.dtype(str)):
-                #     logger.error("We removed the option to cast arrays from string. Please check if this is still needed.")
                 raise TypeError(f"Cannot safely cast '{field.name}' (dtype:  "
                                 f"{result.dtype}) to an array of type {cls.nptype}.")
         return result

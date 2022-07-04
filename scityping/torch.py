@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Tuple, Dict
 
-from .base import Serializable, ABCSerializable
+from .base import Serializable, ABCSerializable, json_like
 from .base_types import SerializedData
 from .numpy import Array
 
