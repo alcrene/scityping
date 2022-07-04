@@ -79,7 +79,8 @@ setup(
 
     extras_require={
         # "numpy": ["numpy", "blosc"],
-        "dev"  : ["check-manifest", "sphinx", "myst-parser"],
+        "dev"  : ["check-manifest"],
+        "docs" : ["sphinx", "myst-parser"],
         "test" : ["coverage", "pytest",
                   "numpy", "scipy", "blosc", "torch", "pint", "quantities", "pydantic",
                   ],
