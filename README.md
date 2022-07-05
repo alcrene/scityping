@@ -24,18 +24,18 @@ from scityping.pydantic import BaseModel
 Example usage:
 
 ```python
-from scityping import Array
+from scityping.numpy import Array
 from scityping.pydantic import BaseModel
 
 class MyModel(BaseModel):
-  data: Array[1, float]  # 1D array of floats
+  data: Array[float, 1]  # 1D array of floats
 
 model = MyModel(data=[1, 2, 3])
 print(model.data)
 # array([1., 2., 3.,], dtype=float)
 json_data = model.json()
 print(json_data)
-#
+# {"data": ["scityping.numpy._ArrayType", {"data": {"data": [1.0, 2.0, 3.0], "dtype": ["scityping.numpy.DType", {"desc": "float64"}]}}]}
 model2 = MyModel.parse_raw(json_data)
 print(model2.data)
 # array([1., 2., 3.,], dtype=float)
@@ -50,9 +50,9 @@ import numpy as np
 from scityping import Array
 
 data = np.array([1, 1, 2, 3, 5])
-json_data = Array.Data.encode(data)
+json_data = Array.json_encoder(data)
 print(json_data)
-# 
+# {'data': ListArrayData(data=[1, 1, 2, 3, 5], dtype=dtype('int64'))}
 data2 = Array.validate(json_data)
 print(data2)
 # array([1, 1, 2, 3, 5], dtype=int)
@@ -93,26 +93,27 @@ The solution provided by this package satisfies all of these requirements.
 ## An extensible serialization hierarchy
 
 The provided `Serializable` class can be used to make almost any class serializable.
-A consistent pattern is used to specify what needs to be serialized, and *scityping* takes care of the rest.
+A standardized pattern is used to specify what needs to be serialized, and *scityping* takes care of the rest.
 
 Note that types defined with `Serializable` take precedence over those already supported by Pydantic; this allows to override builtin Pydantic serializers and deserializers for specific types.
 
 Example: Define a serializable `Signal` class.
 ```python
 # mysignal.py
-from scityping import Serializable, Array
+from scityping import Serializable
+from scityping.numpy import Array
 from scityping.pydantic import dataclass
 
 class Signal(Serializable):
 
   @dataclass
-  class Data:                # The `Data` class stores the minimal
-    values: Array[2, float]  # set of information required to
-    times : Array[1, int]    # recreate the `Signal` class.
+  class Data:                    # The `Data` class stores the minimal
+    values: Array[2, float]      # set of information required to
+    times : Array[1, int]        # recreate the `Signal` class.
     freq  : float
 
     @staticmethod
-    def encode(signal: Signal):
+    def encode(signal: Signal):  # The `encode` method is required
       return (signal.values, signal.times, signal.freq)
 
   def __init__(values, times, freq):
@@ -141,12 +142,12 @@ amsignal = AMSignal(...)
 
 rec = Recorder(signals=[signal, amsignal])
 rec2 = Recorder.parse_raw(rec.json())
-assert type(rec2.signals[0]) is Signal
-assert type(rec2.signals[1]) is AMSignal
+assert type(rec2.signals[0]) is Signal    # Succeeds
+assert type(rec2.signals[1]) is AMSignal  # Also succeeds
 ```
 (With standard Pydantic types, in the example above, values would all be coerced to the `Signal` type after deserialization.)
 
-The default decoder will pass the attributes of the `Data` object to the class’ `__init__` method. For cases where this is unsatisfactory, one can define a custom `decode` method. The example below uses this to return a true `range` object, rather then the `Range` wrapper:
+The default decoder will pass the attributes of the `Data` object to the class’ `__init__` method. For cases where this is unsatisfactory, one can define a custom `decode` method. The example below uses this to return a true `range` object, rather than the `Range` wrapper:
 ```python
 class Range(Serializable, range):
   @dataclass
@@ -159,23 +160,25 @@ class Range(Serializable, range):
 ```
 Note that while the `decode` mechanism can help solve corner cases, in most situations the benefits are cosmetic.
 
-Finally, extending an *existing* type with a serializer is just a matter of defining a subclass with the *same name* (case-insensitive). For example, the provided `Complex` type is implemented as follows:
+Finally, extending an *existing* type with a serializer is just a matter of defining a subclass. For example, the provided `Complex` type is implemented as follows:
 ```python
 class Complex(Serializable, complex):
-  class Data(BaseModel):
+  @dataclass
+  class Data:
     real: float
     imag: float
     def encode(z):
       return z.real, z.imag
 ```
+(When the subclass uses the *same name* (case-insensitive), a bit of magic is applied to associate it to the base type. Otherwise an extra `Complex.register(complex)` is needed.)
 It can then be used to allow serializing all complex numbers (not just instance of `Complex`):
 ```python
-from scityping.pydantic import BaseModel
 class Foo(BaseModel):
   z: Complex
 
 # Serializes even the original data type
 Foo(z=3+4j).json()
+# '{"z": ["__main__.Complex", {"real": 3.0, "imag": 4.0}]}'
 ```
 Note that this works even if `Complex` is defined after `Foo`, without any patching of `Foo`’s list of `__json_encoders__`.[^post-type-def]
 

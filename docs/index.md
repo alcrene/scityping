@@ -7,10 +7,3 @@
 defining-serializers
 implementation_logic
 ```
-
-.. Indices and tables
-.. ==================
-
-.. * :ref:`genindex`
-.. * :ref:`modindex`
-.. * :ref:`search`

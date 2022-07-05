@@ -461,8 +461,8 @@ class _ArrayType(Serializable, np.ndarray):
             if cls.nptype is None or np.issubdtype(result.dtype, cls.nptype):
                 pass
             elif np.can_cast(result, cls.nptype):
-                nptype = infer_numpy_type_to_cast(cls.nptype, value)
-                result = value.astype(nptype)
+                nptype = infer_numpy_type_to_cast(cls.nptype, result)
+                result = result.astype(nptype)
             else:
                 raise TypeError(f"Cannot safely cast '{field.name}' (dtype:  "
                                 f"{result.dtype}) to an array of type {cls.nptype}.")
