@@ -29,7 +29,7 @@ from .base import json_like, Serializable, ABCSerializable
 from .base_types import SerializedData
 
 from typing import Union, Any, Tuple, List, Dict
-from .numpy import NPGenerator, RandomState
+from .numpy import Array, NPGenerator, RandomState
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +50,12 @@ class Distribution(Serializable):
         # Some custom distribution types (e.g. mixture) may have distributions,
         # or lists of distributions, as arguments.
         # We accommodate this by including them in the type.
+        # NOTE: It is still better to use separate fields for Distribution,
+        # and especially List[Distribution] arguments, since those have
+        # much more understandable error messages.
         dist: str
-        args: Tuple[Union[Distribution, List[Distribution], Any],...]
-        kwds: Dict[str, Union[Distribution, List[Distribution], Any]]
+        args: Tuple[Union[Distribution, List[Distribution], Array, float, int, Any],...]
+        kwds: Dict[str, Union[Distribution, List[Distribution], Array, float, int, Any]]
         rng_state: Union[None, NPGenerator, RandomState]=None
 
         @abc.abstractmethod

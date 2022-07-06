@@ -209,7 +209,7 @@ class Serializable:
         #           If so, construct the target type from it.
         types_with_matching_dataclasses = [
             subcls for subcls in set(cls._registry.values())  # We may have duplicate entries (e.g. point both 'Generator' and 'NPGenerator' to NPGenerator)
-            if isinstance(value, subcls.Data)]
+            if isinstance(subcls.Data, type) and isinstance(value, subcls.Data)]   # The first check is mostly for Data given as an abstractmethod/property in an abstract base class
         if types_with_matching_dataclasses:
             assert len(types_with_matching_dataclasses) == 1, "There should never be more than one matching Data class."
             targetT = types_with_matching_dataclasses[0]

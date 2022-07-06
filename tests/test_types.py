@@ -255,6 +255,14 @@ def test_distributions(caplog):
     with pytest.raises(NotImplementedError):
         MvDistribution.json_encoder(D)
 
+    # Test complete serialization to JSON
+    class Foo(BaseModel):
+        dist: Distribution
+    for D in [stats.poisson(3.1), stats.norm(-1, scale=3), stats.zipf(a=2.2)]:
+        foo = Foo(dist=D)
+        foo2 = Foo.parse_raw(foo.json())
+
+
 
 def test_pint():
     # NB: Pint v0.18 changed to 'ApplicationRegistry'; before was 'LazyRegistry'
