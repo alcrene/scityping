@@ -100,7 +100,13 @@ for type_name in ('int8', 'int16', 'int32', 'int64',
                   'float16', 'float32', 'float64', 'float128',
                   'complex64', 'complex128', 'complex256',
                   'bool_', 'str_'):  # Same list as for NPType
-    DType.register(type(np.dtype(type_name)))
+    try:
+        dtype = np.dtype(type_name)
+    except TypeError:
+        # Not all machines define all types; e.g. float128 is not always defined
+        pass
+    else:
+        DType.register(type(dtype))
 
 # ###############
 # NPValue type
@@ -282,7 +288,13 @@ for type_name in ('int8', 'int16', 'int32', 'int64',
                   'float16', 'float32', 'float64', 'float128',
                   'complex64', 'complex128', 'complex256',
                   'bool_', 'str_'):  # Same list as for DType
-    _NPValueType.register(getattr(np, type_name))
+    try:
+        dtype = np.dtype(type_name)
+    except TypeError:
+        # Not all machines define all types; e.g. float128 is not always defined
+        pass
+    else:       
+        _NPValueType.register(getattr(np, type_name))
 
 # ###
 # Array type
