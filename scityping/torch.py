@@ -33,7 +33,7 @@ import torch.nn as nn
 class TorchTensor(Serializable, torch.Tensor):
     class Data(SerializedData):
         data: Array
-        def encode(tensor): return tensor.detach().numpy()
+        def encode(tensor): return tensor.cpu().detach().numpy()
         def decode(data): return torch.tensor(data.data)
 
 Tensor = TorchTensor
@@ -115,7 +115,7 @@ def torch_module_state_encoder(
     if not isinstance(v, nn.Module):
         raise TypeError("This JSON encoder is only intended for PyTorch "
                         f"modules (received value of type {type(v)}).")
-    state = {param: Array.json_encoder(tensor.detach().numpy(),
+    state = {param: Array.json_encoder(tensor.cpu().detach().numpy(),
                                        compression=compression, encoding=encoding)
             for param, tensor in v.state_dict().items()}
 
