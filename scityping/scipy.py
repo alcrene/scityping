@@ -14,6 +14,39 @@ JSON encoders
   + stats
     - scipy.stats._distn_infrastructure.rv_frozen
     - scipy.stats._multivariate.multi_rv
+
+
+Extending support to new distribution types
+===========================================
+
+For distributions defined in scipy.stats, the best place to add support for
+them is in this module. However it is also possible for external packages to
+extend the `Distribution` hierarchy; this can be useful in at least two
+situations:
+- To support custom subclasses of scipy distributions;
+- To add support for a missing scipy distribution type, without having to
+  maintain one's own version of `scityping`.
+
+The main additional consideration when extending these classes in a separate
+module is to ensure that all types used in annotations here are also imported
+in the module providing the extension. Otherwise Pydantic will complain about
+unprepared types still being a `ForwardRef`.
+
+    from scipy import stats
+    from pydantic.dataclasses import dataclass
+
+    from scityping.scipy import RVArg, RNGState   # Required to resolve forward refs
+    from scityping.scipy import MvDistribution
+
+    MvT = stats._multivariate.multivariate_t_frozen
+
+    class MultivariateTDistribution(MvDistribution, MvT):
+        @dataclass
+        class Data(MvDistribution.Data):
+            @staticmethod
+            def encode(rv, include_rng_state=True):
+                ...
+
 """
 
 # ####
@@ -23,6 +56,7 @@ from __future__ import annotations
 import abc
 import logging
 
+import numpy as np
 from scipy import stats
 
 from .base import json_like, Serializable, ABCSerializable
@@ -33,6 +67,9 @@ from .numpy import Array, NPGenerator, RandomState
 
 logger = logging.getLogger(__name__)
 
+# Define types used in Data objects, so classes wanting to extend this know what to import
+RVArg = Union[Array[np.number], float, int, Any, None]  # Union of all accepted types for distribution arguments
+RNGState = Union[None, NPGenerator, RandomState]
 # FIXME: Is there a public name for frozen data types ?
 RVFrozen = stats._distn_infrastructure.rv_frozen
 MvRVFrozen = stats._multivariate.multi_rv_frozen
@@ -54,9 +91,9 @@ class Distribution(Serializable):
         # and especially List[Distribution] arguments, since those have
         # much more understandable error messages.
         dist: str
-        args: Tuple[Union[Distribution, List[Distribution], Array, float, int, Any],...]
-        kwds: Dict[str, Union[Distribution, List[Distribution], Array, float, int, Any]]
-        rng_state: Union[None, NPGenerator, RandomState]=None
+        args: Tuple[RVArg, ...]
+        kwds: Dict[str, RVArg]
+        rng_state: RNGState=None
 
         @abc.abstractmethod
         def encode(rv_frozen, include_rng_state: bool=True):  # Implemented by subclasses

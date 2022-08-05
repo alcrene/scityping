@@ -32,6 +32,11 @@ from .base import json_like, Serializable, ABCSerializable
 from .base_types import SerializedData
 from .utils import LazyDict, get_type_key
 
+try:
+    from pydantic import StrictInt, StrictFloat
+except ModuleNotFoundError:
+    StrictInt, StrictFloat = int, float
+
 import numpy as np
 
 import io
@@ -324,7 +329,7 @@ assert compressors.keys() == decompressors.keys(), "Each compressor must have an
 # Short arrays we just save as string (more legible and more space efficient).
 # Since the string loses type information, we save the dtype as well.
 class ListArrayData(SerializedData):
-    data : list
+    data : Union[list, StrictFloat, StrictInt]  # Scalar types are to deal with 0-dim arrays
     dtype: DType
     @classmethod
     def encode(cls, array):
