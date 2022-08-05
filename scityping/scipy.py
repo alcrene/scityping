@@ -59,6 +59,7 @@ import logging
 import numpy as np
 from scipy import stats
 
+from .utils import ModuleList
 from .base import json_like, Serializable, ABCSerializable
 from .base_types import SerializedData
 
@@ -76,7 +77,9 @@ MvRVFrozen = stats._multivariate.multi_rv_frozen
 MvNormalFrozen = stats._multivariate.multivariate_normal_frozen
 # List of modules searched for distribution names; precedence is given to
 # modules earlier in the list
-stat_modules = [stats]
+# Note that modules can also be specified as strings (so "scipy.stats" would
+# also work below). This allows modules to add themselves to this list.
+stat_modules = ModuleList([stats])
 
 class Distribution(Serializable):
     """
@@ -106,7 +109,7 @@ class Distribution(Serializable):
                     break
             if dist is None:
                 raise RuntimeError("Unable to find a distribution named "
-                                   f"'{dist}' within the modules {stat_modules}. "
+                                   f"'{data.dist}' within the modules {stat_modules}. "
                                    "To add a module to search for distributions, "
                                    f"update the list at {__name__}.stat_modules.")
             if isinstance(dist, Serializable):

@@ -8,6 +8,62 @@ logger = logging.getLogger(__name__)
 class NotFound:
     pass
 
+def deref_module_name(val):
+    """
+    If `val` is a string, assume it is an import path to that module and
+    return that module.
+    Otherwise, return `val`.
+    """
+    if "." not in val:
+        raise NotImplementedError(
+            "I'm not sure in which situation one would need a str value "
+            "that doesn't include a module; waiting for a use case.")
+    else:
+        # 'val' is a dotted name: first part indicates the package
+        # where type is defined.
+        # Problem: given "foo.bar.ObjName", we don't know whether to do
+        # `from foo.bar import ObjName` or `from foo import bar.ObjName`.
+        # So we try all combinations, giving precedence to more
+        # specified packages (so `from foo.bar` would be tried first).
+        # For each combination, we first check whether that package is
+        # imported:  if not, it is not possible (without irresponsible
+        # manipulation of imports) for that path to `ObjName` to be
+        # defined.
+        modname = val
+        name = ""
+        for k in range(val.count(".")):
+            modname, name_prefix = val.rsplit(".", 1)
+            name = name_prefix + ("." + name if name else "")
+            mod = sys.modules.get(modname)
+            if mod:  # Only attempt to import from already loaded modules
+                try:
+                    val = getattr(mod, name)
+                except AttributeError:
+                    pass  # Continue trying with a less specified import path
+                else:
+                    break
+        else:
+            # If we exit the loop without finding anything, it means the
+            # required module is not available.
+            raise ModuleNotFoundError(f"The value {val} does not match "
+                                      "any imported module.")
+
+    return val
+
+class ModuleList(list):
+    def __iter__(self):
+        """
+        Return elements from the list. Strings are replaced by importing the
+        corresponding module.
+        """
+        baseiter = super().__iter__()
+        for i, el in enumerate(baseiter):
+            if isinstance(el, str):
+                el = deref_module_name(el)
+                # Update list so module is not imported again
+                self[i] = el
+            yield el
+
 class LazyDict(dict):
     """A dictionary allowing to specify objects that haven’t been loaded yet.
 
@@ -19,8 +75,8 @@ class LazyDict(dict):
     """
     def __getitem__(self, key):
         val = super().__getitem__(key)
-        newval = self.deref_val(val)
-        if newval is not val:
+        if isinstance(val, str):
+            newval = deref_module_name(val)
             # Store value so it doesn’t need to be imported again
             self[key] = newval
             val = newval
@@ -28,55 +84,16 @@ class LazyDict(dict):
 
     def get(self, key, default=None):
         val = super().get(key, default)
-        if val != default:  # I think it’s less surprising if the default is always unmodified ?
+        if val != default and isinstance(val, str):  # I think it’s less surprising if the default is always unmodified ?
             try:
-                newval = self.deref_val(val)
+                newval = deref_module_name(val)
             except ModuleNotFoundError:
                 return default  # EARLY EXIT
-            if newval is not val:
-                # Store value so it doesn’t need to be imported again
-                self[key] = newval
-                val = newval
+            # Store value so it doesn’t need to be imported again
+            self[key] = newval
+            val = newval
         return val
 
-    @staticmethod
-    def deref_val(val):
-        if isinstance(val, str):
-            if "." not in val:
-                raise NotImplementedError(
-                    "I'm not sure in which situation one would need a str value "
-                    "that doesn't include a module; waiting for a use case.")
-            else:
-                # 'val' is a dotted name: first part indicates the package
-                # where type is defined.
-                # Problem: given "foo.bar.ObjName", we don't know whether to do
-                # `from foo.bar import ObjName` or `from foo import bar.ObjName`.
-                # So we try all combinations, giving precedence to more
-                # specified packages (so `from foo.bar` would be tried first).
-                # For each combination, we first check whether that package is
-                # imported:  if not, it is not possible (without irresponsible
-                # manipulation of imports) for that path to `ObjName` to be
-                # defined.
-                modname = val
-                name = ""
-                for k in range(val.count(".")):
-                    modname, name_prefix = val.rsplit(".", 1)
-                    name = name_prefix + ("." + name if name else "")
-                    mod = sys.modules.get(modname)
-                    if mod:  # Only attempt to import from already loaded modules
-                        try:
-                            val = getattr(mod, name)
-                        except AttributeError:
-                            pass  # Continue trying with a less specified import path
-                        else:
-                            break
-                else:
-                    # If we exit the loop without finding anything, it means the
-                    # required module is not available.
-                    raise ModuleNotFoundError(f"The value {val} does not match "
-                                              "any imported module.")
-
-        return val
 
 def get_type_key(obj: type):
     try:
