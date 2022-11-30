@@ -12,15 +12,49 @@ from typing import Any
 from functools import partial
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic.generics import GenericModel as PydanticGenericModel
-from pydantic.main import ModelMetaclass as PydanticModelMetaclass
+from pydantic.main import (ModelMetaclass as PydanticModelMetaclass,
+                           ValidationError as PydanticValidationError)
 from pydantic.json import custom_pydantic_encoder
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 from .base import ABCSerializable, Serializable
 
+class ValidationError(PydanticValidationError):
+    """
+    This wraps ValidationError, and redefines the methods using `__name__`
+    so they use `__qualname__` instead.
+    """
+    def __init__(self, orig_exception: PydanticValidationError):
+        super().__init__(orig_exception.raw_errors, orig_exception.model)
+        self._error_cache = orig_exception._error_cache
+
+    def __str__(self) -> str:
+        errors = self.errors()
+        no_errors = len(errors)
+        return (
+            f'{no_errors} validation error{"" if no_errors == 1 else "s"} for {self.model.__qualname__}\n'
+            f'{display_errors(errors)}'
+        )
+
+    def __repr_args__(self) -> 'ReprArgs':
+        return [('model', self.model.__qualname__), ('errors', self.errors())]
+
+
 # Based off pydantic.json.custom_pydantic_encoder
 def extensible_encoder(obj: Any, base_encoder) -> Any:
     if isinstance(obj, ABCSerializable):
-        return Serializable.json_encoder(obj)
+        try:
+            return Serializable.json_encoder(obj)
+        except PydanticValidationError as e:
+            # Pydantic's ValidationError uses obj.__name__ it its error message.
+            # With our SciTyping pattern, this results in all error message display `Data`
+            # as the object, which isn't very useful.
+            # To improve the error message, we modify the model attached to
+            # the exception so that its __name__ is actually __qualname__.
+            # This monkey patching isin't especially clean, but it should be
+            # innocuous: after all, we've already aborted code execution.
+            if e.model.__name__ == "Data":
+                e.model.__name__ = e.model.__qualname__
+            raise
     else:
         return base_encoder(obj)
 
