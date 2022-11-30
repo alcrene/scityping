@@ -274,7 +274,7 @@ class Serializable:
             if len(valuestr) > 1000: valuestr = valuestr[:999] + "…"
             raise TypeError(f"Unable to validate the received value to the type {cls}."
                             f"    Type received: {type(value).__qualname__}; registry key: '{type(value).__qualname__.lower()}'\n"
-                            f"    Value received: {value}\n\n")
+                            f"    Value received: {valuestr}\n\n")
                             # f"Attempting `{cls}(<value>)` raised the "
                             # f"following error:\n{e}")
     @classmethod

@@ -182,11 +182,11 @@ Foo(z=3+4j).json()
 ```
 Note that this works even if `Complex` is defined after `Foo`, without any patching of `Foo`’s list of `__json_encoders__`.[^post-type-def]
 
-[^post-type-def]: The corollary of this is that it makes it easier for modules to arbitrarily modify how types are serialized by *already imported* modules. Thus by adding a new serializer, a new package may break a previously working one. Also, while the hooks for extending type suport don't increase the attack surface (imported Python modules are already allowed to inject code wherever they please), they might make it easier for a malicious actor to run arbitrary code when data are serialized – although, if this is a concern for you, you are probably not allowed to install unaudited packages like this one.
+[^post-type-def]: The corollary of this is that it makes it easier for modules to arbitrarily modify how types are serialized by *already imported* modules. Thus by adding a new serializer, a new package may break a previously working one. Also, while the hooks for extending type suport don't increase the attack surface vis-à-vis a malicious actor (imported Python modules are already allowed to inject code wherever they please), they might make things easier for them.
 
 ## Performance
 
-For types serialized with Pydantic, this adds a single `isinstance` check for each serialization call, which should be negligeable.[^2]
+For types serialized with Pydantic, this adds a single `isinstance` check for each serialization call, which should be negligeable.[^negligeable-comp-cost]
 
 Serialization with `Serializable` is not as aggressively tested with regards to performance and may be a bit slower.
 
@@ -194,7 +194,7 @@ Serialization with `Serializable` is not as aggressively tested with regards to 
 
 In general, within scientific applications these performance considerations should not matter: data is typically serialized/deserialized only at the beginning/end of a computation, which is not where the speed bottlenecks usually are. 
 
-[^2]: Unless *a lot* of builtin types are extended with serializers.
+[^negligeable-comp-cost]: Unless *a lot* of builtin types are extended with serializers.
 
 ## Defined types
 
