@@ -142,7 +142,11 @@ class TorchGenerator(Serializable, torch.Generator):
                 logger.error(
                     "Unable to instantiate a torch Generator on device "
                     f"'{data.device}'. Used the default '{gen.device}' instead.")
-            gen.set_state(data.state)
+            # NB: It seems to be a bug in PyTorch that even for a torch generator
+            #     located on GPU, `set_state` only accepts arguments located on CPU.
+            #     Otherwise, presumably the error message
+            #     – "RNG state must be a torch.ByteTensor" – would be more useful.
+            gen.set_state(data.state.to("cpu"))
             return gen
 
 Generator = TorchGenerator
