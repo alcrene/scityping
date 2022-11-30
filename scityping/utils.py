@@ -143,6 +143,7 @@ class TypeRegistry(dict):
                 # is the same, this is fine.
                 return  # EARLY EXIT
             else:
+                import pdb; pdb.set_trace()
                 logger.error("The Serializable TypeRegistry already contained an "
                              f"entry for key {self._key_tokens[tokens]}, which "
                              "has been replaced.")
@@ -196,8 +197,16 @@ class TypeRegistry(dict):
                 raise KeyError(f"No entry for key '{key}'. Closest matches: "
                                f"{[regkey for regtokens, regkey in matches]}.")
             elif len(rtl_matches) > 1:
-                raise KeyError("Unable to unambiguously match a registry "
-                               f"entry to '{key}'. Registry contains: {rtl_matches}.")
+                # Problem: a longer path can shadow a shorter one
+                # Solution: if there is an exact match, pick that one
+                exact_matches = [m for m in rtl_matches if m == key]
+                if len(exact_matches) == 1:
+                    rtl_matches = exact_matches
+                else:
+                    # Don’t use KeyError, because then there may be no way do distinguish this
+                    # case from a missing case (relied upon by e.g. `get`)
+                    raise ValueError("Unable to unambiguously match a registry "
+                                     f"entry to '{key}'. Registry contains: {rtl_matches}.")
 
             return super().__getitem__(rtl_matches[0])
 
