@@ -97,9 +97,9 @@ class DType(Serializable):
         else:
             return super().validate(value, field=field)
 
+DType.register(np.dtype)
 # Because the name 'DType' doesn't match the class we want to make serializable
 # (in fact we want to make many classes serializable), we update the registry manually
-DType.register(np.dtype)
 for type_name in ('int8', 'int16', 'int32', 'int64',
                   'uint8', 'uint16', 'uint32', 'uint64',
                   'float16', 'float32', 'float64', 'float128',
@@ -112,6 +112,9 @@ for type_name in ('int8', 'int16', 'int32', 'int64',
         pass
     else:
         DType.register(type(dtype))
+#         T = type(dtype)
+#         if T not in DType._registry:
+#             DType.register(T)
 
 # ###############
 # NPValue type
