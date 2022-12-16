@@ -85,6 +85,11 @@ class Distribution(Serializable):
     """
     Pydantic-aware type for SciPy _frozen_ distributions. A frozen distribution
     is one for which the parameters (like `loc` and `scale`) are fixed.
+
+    Note that any subclass of `Distribution` must also have its nested `Data`
+    be a subclass of `Distribution`. This guarantee facilitates the implementation
+    of some decoders, by allowing things like ``isinstance(data, Distribution.Data)``.
+    (We use this for example in our Mixture implementation.)
     """
     class Data(abc.ABC, SerializedData):
         # Some custom distribution types (e.g. mixture) may have distributions,
@@ -102,33 +107,40 @@ class Distribution(Serializable):
         def encode(rv_frozen, include_rng_state: bool=True):  # Implemented by subclasses
             raise NotImplementedError
         def decode(data):
-            dist = None
-            for module in stat_modules:
-                dist = getattr(module, data.dist, None)
-                if dist:
-                    break
-            if dist is None:
-                raise RuntimeError("Unable to find a distribution named "
-                                   f"'{data.dist}' within the modules {stat_modules}. "
-                                   "To add a module to search for distributions, "
-                                   f"update the list at {__name__}.stat_modules.")
-            if isinstance(dist, Serializable):
+            dist = Distribution.get_dist(data.dist)
+            if dist is Distribution:
+                raise RuntimeError("The data seem to have been serialized with "
+                    "the generic type `Distribution`; this should not be possible.")
+            elif isinstance(dist, Serializable):
                 return dist.Data.decode(data)
             else:
                 frozen_dist = dist(*data.args, **data.kwds)
                 frozen_dist.random_state = data.rng_state
                 return frozen_dist
 
-    # # TODO
-    # @classmethod
-    # def __modify_schema__(cls, field_schema):
-    #     field_schema.update(type='array',
-    #                         items=[{'type': 'string'},
-    #                                {'type': 'string'},  # dist name
-    #                                {'type': 'array'},   # dist args
-    #                                {'type': 'array'},   # dist kwds
-    #                                {'type': 'array'}    # random state (optional) Accepted: int, old RandomState, new Generator
-    #                                ])
+        # # TODO
+        # @classmethod
+        # def __modify_schema__(cls, field_schema):
+        #     field_schema.update(type='array',
+        #                         items=[{'type': 'string'},
+        #                                {'type': 'string'},  # dist name
+        #                                {'type': 'array'},   # dist args
+        #                                {'type': 'array'},   # dist kwds
+        #                                {'type': 'array'}    # random state (optional) Accepted: int, old RandomState, new Generator
+        #                                ])
+
+    def __init_subclass__(cls):
+        data_cls = getattr(cls, "Data", None)
+        supercls = next(filter(None,
+            (base if issubclass(base, Distribution) else False for base in cls.mro()[1:])))  # The `.Data` attribute of the nearest parent
+        if  (  data_cls is None
+               or not isinstance(data_cls, type)
+               or not issubclass(data_cls, supercls.Data) ):
+            base_name = f"{supercls.__module__}.{supercls.__qualname__}"
+            raise TypeError(f"{cls.__name__} is a `{base_name}` "
+                            "subclass and must define a nested `Data` class "
+                            f"as a subclass of `{base_name}.Data`.")
+        super().__init_subclass__()
 
     # The distinction that only frozen dists are serializable is not obvious,
     # so we wrap `validate` to catch that error and print an explanation message
@@ -139,6 +151,20 @@ class Distribution(Serializable):
             raise TypeError("`Distribution` expects a frozen random variable; "
                             f"received '{v}' with unspecified parameters.")
         return super().validate(v)
+
+    @staticmethod
+    def get_dist(name: str):
+        """Search the `stat_modules` for a distribution type matching `name`."""
+        for module in stat_modules:
+            dist = getattr(module, name, None)
+            if dist:
+                break
+        if dist is None:
+            raise RuntimeError("Unable to find a distribution named "
+                               f"'{name}' within the modules {stat_modules}. "
+                               "To add a module to search for distributions, "
+                               f"update the list at {__name__}.stat_modules.")
+        return dist
 
 
 class UniDistribution(Distribution, RVFrozen):
@@ -162,7 +188,7 @@ class MvDistribution(Distribution, MvRVFrozen):
                 "cased for each multivariate distribution, and this has "
                 f"not yet been done for '{rv._dist}'.")
 class MvNormalDistribution(MvDistribution, MvNormalFrozen):
-    class Data(Distribution.Data):
+    class Data(MvDistribution.Data):
         def encode(rv, include_rng_state=True):
             dist = rv._dist
             random_state = dist._random_state if include_rng_state else None
