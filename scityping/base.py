@@ -1,12 +1,14 @@
 import abc
 import logging
-from typing import Union, Any, List
+from typing import Union, Type, Any, List, Tuple
 from collections.abc import Callable as Callable_, Sequence as Sequence_
 from dataclasses import asdict, is_dataclass
 import inspect
 from .utils import get_type_key, TypeRegistry
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["json_like", "Serializable", "Serialized"]
 
 # ##############
 # Custom JSON objects
@@ -326,3 +328,26 @@ class Serializable:
                 #     f"dict, these must be arguments to {serializer_cls.__qualname__}.Data.")
         return (get_type_key(serializer_cls), data)
 
+
+class SerializedGen():
+    """
+    Convenience constructor for a type describing serialized objects.
+    If ``MyType`` is a subclass of `Serializable`, then ``Serialized[MyType]``
+    returns the type ``Tuple[str, T.Data]``.
+    """
+    # Make a singleton
+    __instance = None
+    def __new__(cls):
+        return SerializedGen.__instance or super().__new__(cls)
+    # Actual implementation
+    def __getitem__(self, T: Type[Serializable]) -> Type:
+        if not isinstance(T, type):
+            raise TypeError("Serializable[…] only accepts types which are "
+                            f"subclasses of Serializable. {T} is not even a type.")
+        elif not issubclass(T, Serializable):
+            raise TypeError("Serializable[…] only accepts types which are "
+                            "subclasses of Serializable. "
+                            f"{T} does not subclass Serializable.")
+        return Tuple[str, T.Data]
+
+Serialized = SerializedGen()
