@@ -40,7 +40,6 @@ def json_like(value: Any, type_str: Union[str,List[str]],
 # ###############
 # Base class for custom serializable types
 
-
 # NB: In pydantic.py, we associate the `Serializable.json_encoder` to the *abstract* base class `ABCSerializable`.
 class ABCSerializable(abc.ABC):
     """

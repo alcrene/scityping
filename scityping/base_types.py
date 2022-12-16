@@ -69,7 +69,9 @@ __all__ = ["SerializedData", "Complex", "Range", "Slice",
 class SerializedDataMeta(abc.ABCMeta):
     def __new__(metacls, cls, bases, namespace):
         for nm, attr in namespace.items():
-            if isinstance(attr, Callable_):  # NB: staticmethod and classmethod objects are not callable
+            if (not nm.startswith("__") and isinstance(attr, Callable_)):
+                # NB: staticmethod and classmethod objects are not callable
+                # Dunder methods should remain methods
                 namespace[nm] = staticmethod(attr)
         obj = super().__new__(metacls, cls, bases, namespace)
         return dataclass(obj)

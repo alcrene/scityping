@@ -81,6 +81,8 @@ MvNormalFrozen = stats._multivariate.multivariate_normal_frozen
 # also work below). This allows modules to add themselves to this list.
 stat_modules = ModuleList([stats])
 
+## Generic definitions ##
+
 class Distribution(Serializable):
     """
     Pydantic-aware type for SciPy _frozen_ distributions. A frozen distribution
@@ -103,6 +105,14 @@ class Distribution(Serializable):
         kwds: Dict[str, RVArg]
         rng_state: RNGState=None
 
+        @staticmethod
+        @abc.abstractmethod
+        def valid_distname(dist_name: str) -> bool:
+            """
+            Return `True` if `dist_name` is a possible value for `dist` for
+            this `Data` class.
+            """
+            return False  # Distributions must be serialized with a subclass
         @abc.abstractmethod
         def encode(rv_frozen, include_rng_state: bool=True):  # Implemented by subclasses
             raise NotImplementedError
@@ -110,14 +120,31 @@ class Distribution(Serializable):
             dist = Distribution.get_dist(data.dist)
             if dist is Distribution:
                 raise RuntimeError("The data seem to have been serialized with "
-                    "the generic type `Distribution`; this should not be possible.")
-            elif isinstance(dist, Serializable):
+                                   "the generic type `Distribution`; this should not be possible.")
+            elif ( isinstance(dist, Serializable)
+                   and getattr(dist.Data, "decode", Distribution.Data) is not Distribution.Data ):
+                # Second condition intended to prevent infinite recursion
                 return dist.Data.decode(data)
             else:
                 frozen_dist = dist(*data.args, **data.kwds)
                 frozen_dist.random_state = data.rng_state
                 return frozen_dist
 
+        def __new__(cls, dist, *a, **kw):
+            # Consider if a type annotation specifies Serialized[MvDistribution]
+            # and we previde the serialized form of MvNormalDistribution
+            # => We would to replace `cls` (set to MvDistribution.Data)
+            #    by MvNormalDistribution.Data. This is what we do here:
+            #    `data_type` is the `Data` subclass we need to use.
+            data_type = Distribution.get_Data_type(dist)
+            assert issubclass(data_type, cls), "If `data_type` is not a subclass of `cls`, __init__ will not be called."
+            if super().__new__ is object.__new__:
+                return super().__new__(data_type)
+            else:
+                if a:  # There are positional arguments:
+                    return super().__new__(data_type, dist, *a, **kw)
+                else:  # `dist` might be a keyword-only argument
+                    return super().__new__(data_type, dist=dist, **kw)
         # # TODO
         # @classmethod
         # def __modify_schema__(cls, field_schema):
@@ -166,9 +193,41 @@ class Distribution(Serializable):
                                f"update the list at {__name__}.stat_modules.")
         return dist
 
+    @staticmethod
+    def get_Data_type(dist_name: str):
+        """
+        From the `dist_name` included in serialized data, determine the subclass
+        of `Distribution.Data` which produced it.
+        """
+        data_types = tuple(set(dist_type.Data
+                               for dist_type in Distribution._registry.values()
+                               if dist_type.Data.valid_distname(dist_name)))
+        # Remove types which are strict subclasses of another
+        to_remove = set()
+        for i, T in enumerate(data_types):
+            if issubclass(T, data_types[:i] + data_types[i+1:]):
+                to_remove.add(i)
+        data_types = tuple(T for i, T in enumerate(data_types) if i not in to_remove)
+        # In case of ambiguity, raise error and abort => better fix this error early than let it seep into the code
+        if len(data_types) == 0:
+            raise RuntimeError("No subclass of `Distribution.Data` seems to recognize "
+                               f"the distribution type '{dist_name}'.\nData classes "
+                               f"checked: {T.Data for T in Distribution._registry.values()}")
+        elif len(data_types) > 1:
+            raise RuntimeError(f"Multiple `Data` classes recognize '{dist_name}': "
+                               f"{data_types}")
+        else:
+            return data_types[0]
+
+## Concrete subclasses ##
 
 class UniDistribution(Distribution, RVFrozen):
     class Data(Distribution.Data):
+        @staticmethod
+        def valid_distname(dist_name: str) -> bool:
+            univariate_names = (o.name for o in stats.__dict__.values()
+                                if isinstance(o, stats._distn_infrastructure.rv_generic))
+            return dist_name in univariate_names
         def encode(rv, include_rng_state=True):
             if rv.args:
                 logger.warning(
@@ -182,6 +241,10 @@ class UniDistribution(Distribution, RVFrozen):
 #     a different convention (and don't have a standard 'kwds' attribute)
 class MvDistribution(Distribution, MvRVFrozen):
     class Data(Distribution.Data):
+        @staticmethod
+        def valid_distname(dist_name: str) -> bool:
+            # Multivariate distributions must always be serialized with subclasses
+            return False
         def encode(rv, include_rng_state=True):
             raise NotImplementedError(
                 "The json_encoder for `Distribution` needs to be special "
@@ -189,6 +252,9 @@ class MvDistribution(Distribution, MvRVFrozen):
                 f"not yet been done for '{rv._dist}'.")
 class MvNormalDistribution(MvDistribution, MvNormalFrozen):
     class Data(MvDistribution.Data):
+        @staticmethod
+        def valid_distname(dist_name: str) -> bool:
+            return dist_name == "multivariate_normal"
         def encode(rv, include_rng_state=True):
             dist = rv._dist
             random_state = dist._random_state if include_rng_state else None

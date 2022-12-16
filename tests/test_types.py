@@ -341,3 +341,7 @@ def test_torch():
         assert a.shape == b.shape
         assert a.dtype == b.dtype
         assert (a == b).all()
+
+
+    # TODO: Test TorchModule, TorchGenerator
+    #       Test TorchTensor & TorchGenerator with GPU tensors, if GPU is available
