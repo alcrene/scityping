@@ -307,9 +307,12 @@ class Serializable:
             # I'm not sure what the most appropriate error type should be, but at least TypeError is consistent with the similar error in `validate()`
             # Also `KeyError` is special and doesn't display newlines; I think it is best reserved for cases where the user interacts directly with a mapping
             raise TypeError("There seems to be no JSON encoder registered for any "
-                           f"of the types {type(value).mro()}. This is likely a "
-                           f"bug in scityping.Serializable.\nClass: {cls}\n"
-                           f"Registered types: {cls._registry.keys()}")
+                           f"of the types {type(value).mro()}. Note that types "
+                           "depending on external librairies (like scipy or torch) "
+                           "are only registered when the corresponding module in "
+                           "scityping is imported.\n"
+                           f"Attempted to serialize using: {cls}.json_encoder\n"
+                           f"Registered types for this class: {cls._registry.keys()}")
 
         data = serializer_cls.Data.encode(value, *args, **kwargs)
         if not isinstance(data, serializer_cls.Data):
