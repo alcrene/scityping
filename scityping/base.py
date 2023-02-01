@@ -279,7 +279,7 @@ class Serializable:
                             # f"Attempting `{cls}(<value>)` raised the "
                             # f"following error:\n{e}")
     @classmethod
-    def json_encoder(cls, value, *args, **kwargs):
+    def json_encoder(cls, value, *args, **kwargs) -> Tuple[str, "Data"]:
         """
         Generic custom serializer. All serialized objects follow the format
         ``(type name, serialized data)``. For example,
@@ -318,7 +318,20 @@ class Serializable:
             # To reduce boilerplate, we allow `encode` to return a tuple or dict
             # These are respectively treated as positional or keyword args to Data
             if isinstance(data, tuple):
-                data = serializer_cls.Data(*data)
+                try:
+                    data = serializer_cls.Data(*data)
+                except TypeError as e:
+                    if e.args[0].startswith("__init__() takes exactly 1 positional argument"):
+                        # We can end up here if we try to initialize a Pydantic BaseModel with positional arguments.
+                        # As a convenience, if Data class has a `__fields__` attribute, we will use that to construct a dictionary
+                        fields = getattr(serializer_cls.Data, "__fields__", None)
+                        if fields is None:
+                            raise e  # We are not in a BaseModel - re-raise the original error
+                        kwds = {k: v for k, v in zip(fields, data)}
+                        data = serializer_cls.Data(**kwds)
+                    else:
+                        raise e
+
             elif isinstance(data, dict):
                 data = serializer_cls.Data(**data)
             else:
