@@ -8,6 +8,9 @@ logger = logging.getLogger(__name__)
 class NotFound:
     pass
 
+class UnsafeDeserializationError(RuntimeError):
+    pass
+
 def deref_module_name(val):
     """
     If `val` is a string, assume it is an import path to that module and
