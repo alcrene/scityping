@@ -146,7 +146,6 @@ class TypeRegistry(dict):
                 # is the same, this is fine.
                 return  # EARLY EXIT
             else:
-                import pdb; pdb.set_trace()
                 logger.error("The Serializable TypeRegistry already contained an "
                              f"entry for key {self._key_tokens[tokens]}, which "
                              "has been replaced.")

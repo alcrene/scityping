@@ -126,7 +126,7 @@ class Serializable:
         ## Update subclass registries ##
         # Create a new registry for this class, and add to all the parents
         cls._registry = TypeRegistry()
-        for C in cls.mro():
+        for C in type.mro(cls):  # In contrast to `cls.mro()`, works also with metaclasses
             if issubclass(C, Serializable):
                 C._registry[cls] = cls
         # Update the registry of base clasess
@@ -139,7 +139,7 @@ class Serializable:
         # MAGIC: Register the lowest class in the MRO OF THE SAME NAME as a virtual subclass.
         #        This is to allow adding serializers for existing data types.
         name = cls.__qualname__.lower()
-        basecls = next(C for C in cls.mro()[::-1]
+        basecls = next(C for C in type.mro(cls)[::-1]
                        if C.__qualname__.lower() == name)
         if basecls is not cls:
             cls.register(basecls)
@@ -155,7 +155,7 @@ class Serializable:
             base for base in ABCSerializable._base_types[cls]
             if not issubclass(base, T)) + (T,)
         # Tell all the parents of `cls` that they can serialize `T`.
-        for C in cls.mro():
+        for C in type.mro(cls):
             if issubclass(C, Serializable):
                 C._registry[T] = cls
 
@@ -182,7 +182,7 @@ class Serializable:
         # Branch 2: Check if it matches one of the base types wrapped by serializers
         #           If so, cast it to the corresponding subclass by calling `subclass.validate` on `value`.
         base_types = ABCSerializable._base_types
-        matching_basesubclasses = {subcls: set(subcls.mro())
+        matching_basesubclasses = {subcls: set(type.mro(subcls))
                                    for subcls in cls._registry.values()
                                    if isinstance(value, base_types[subcls])}
         if matching_basesubclasses:
