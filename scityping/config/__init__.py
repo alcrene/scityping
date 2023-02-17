@@ -13,6 +13,7 @@ class Config(ValidatingConfig):
     ensure_user_config_exists: ClassVar = False
 
     trust_all_inputs: bool=False
+    safe_packages: set={"scityping"}
     default_namespace: dict=Field(
         default_factory=lambda: {'__builtins__': __builtins__,
                                  'np': np,
