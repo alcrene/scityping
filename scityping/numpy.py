@@ -480,12 +480,14 @@ class _ArrayType(Serializable, np.ndarray):
             # Issubdtype allows specifying abstract dtypes like 'number', 'floating'
             if cls.nptype is None or np.issubdtype(result.dtype, cls.nptype):
                 pass
-            elif np.can_cast(result, cls.nptype):
-                nptype = infer_numpy_type_to_cast(cls.nptype, result)
-                result = result.astype(nptype)
             else:
-                raise TypeError(f"Cannot safely cast '{field.name}' (dtype:  "
-                                f"{result.dtype}) to an array of type {cls.nptype}.")
+                # Inferring the nptype first avoids warnings if cls.nptype is an abstract type, like np.inexact
+                nptype = infer_numpy_type_to_cast(cls.nptype, result)
+                if np.can_cast(result, nptype, casting="safe"):
+                    result = result.astype(nptype)
+                else:
+                    raise TypeError(f"Cannot safely cast '{field.name}' (dtype:  "
+                                    f"{result.dtype}) to an array of type {cls.nptype}.")
         return result
 
 class _ArrayMeta(type):
