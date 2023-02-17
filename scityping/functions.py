@@ -125,9 +125,15 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
        within brackets: ``PureFunction[[arg types], return y]``. However the
        returned type doesn't support type-checking.
 
-    .. WIP: One or more modules can be specified to provide definitions for
+    .. WIP:: One or more modules can be specified to provide definitions for
        deserializing the file, but these modules are not serialized with the
        function.
+
+    .. Hint:: `PureFunction` instances can be pickled, using the same serializer
+       as `Serializable.json_encoder`. This can make them more portable:
+       whereas a pickled python function requires that the original function &
+       module still exist at the same location, a pickled `PureFunction`
+       deserializes from the source code in the serialized data.
     """
     modules = []  # Use this to list modules that should be imported into
                   # the global namespace before deserializing the function
@@ -535,10 +541,14 @@ def split_decorators(s):
 
 
 import ast
-try:
-    import astunparse
-except ModuleNotFoundError:
-    pass
+if not hasattr(ast, "unparse"): # unparse is available only for >3.9, but the astunparse package backports to earlier versions
+    try:
+        import astunparse
+    except ModuleNotFoundError:
+        logger.warning("You may want to install `astunparse` for more reliable "
+                       "function serialization, or upgrade to Python ≥3.9.")
+    else:
+        ast.unparse = astunparse.unparse
 import textwrap
 def remove_comments(s, on_fail='warn'):
     """
@@ -556,7 +566,7 @@ def remove_comments(s, on_fail='warn'):
         instead of simply printing a warning.
     """
     try:
-        lines = astunparse.unparse(ast.parse(textwrap.dedent(s))).split('\n')
+        lines = ast.unparse(ast.parse(textwrap.dedent(s))).split('\n')
     except Exception as e:
         if on_fail == 'warn':
             warn(f"{str(e)}\n`remove_comments` encountered the error above. "

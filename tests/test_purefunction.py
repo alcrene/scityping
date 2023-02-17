@@ -5,7 +5,7 @@ import scityping
 from scityping.base import Serializable
 from scityping.utils import UnsafeDeserializationError
 from scityping.pydantic import BaseModel
-from scityping.purefunction import PureFunction, PartialPureFunction, CompositePureFunction
+from scityping.functions import PureFunction, PartialPureFunction, CompositePureFunction
 
 @PureFunction
 def pure_f(x, n=2):

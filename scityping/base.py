@@ -1,6 +1,6 @@
 import abc
 import logging
-from typing import Union, Type, Any, List, Tuple
+from typing import Union, Type, Any, Callable, List, Tuple
 from collections.abc import Callable as Callable_, Sequence as Sequence_
 from dataclasses import asdict, is_dataclass
 import inspect
@@ -89,6 +89,20 @@ class Serializable:
        serializable. Specifically, the class' `__qualname__` attribute is
        used for this somewhat magical behaviour.
 
+    .. rubric:: Pickle support
+       Serializable objects automatically support pickling if their
+       `Data.encode` method returns something that is pickleable.
+       Note that this only applies to *subclasses* of `Serializable`; many of
+       the provided types in this package (including `~scityping.numpy.Array`,
+       `~scityping.scipy.Distribution`) *don't* return instances of themselves
+       when validating values, instead returning clean, unmodified base types
+       (the stated examples return `numpy.ndarray` and `scipy.stats.<rv_frozen>`
+       respectively). For these types, pickling if and only if the base types
+       supports it.
+
+       Among the types defined in this package,
+       `~scityping.functions.PureFunction` and its subclasses is probably the
+       one which most benefits from pickling support.
     """
     # Subclasses are stored in a registry
     # This allows deserializers to be retrieved based on the serialized name.
@@ -163,6 +177,9 @@ class Serializable:
     @classmethod  # Pydantic validation hook
     def __get_validators__(cls):
         yield cls.validate
+
+    def __reduce__(self):  # Pickle serialization hook
+        return (self.validate, (self.json_encoder(self),))
 
     @classmethod
     def validate(cls, value, field=None):  # `field` not currently used: only there for consistency
