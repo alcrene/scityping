@@ -32,7 +32,7 @@ def test_TypeRegistry():
     # with pytest.raises(ValueError):  # Duplicate keys
     #     TypeRegistry(Generator=A, generator=A)
 
-    with pytest.raises(KeyError):  # Ambiguous match
+    with pytest.raises(ValueError):  # Ambiguous match
         TypeRegistry({"Generator":A,
                       "torch.Generator":B})["mypkg.Generator"]
     with pytest.raises(KeyError):  # No matching entry
