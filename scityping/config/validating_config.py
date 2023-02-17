@@ -10,9 +10,9 @@ Within MyPackage/config.py, one then does something like
 
     from pathlib import Path
     from pydantic import BaseModel
-    from mackelab_toolbox.config import ProjectConfig
+    from mackelab_toolbox.config import ValidatingConfig
 
-    class Config(ProjectConfig):
+    class Config(ValidatingConfig):
         class PATH(BaseModel):
             <path param name 1>: <type 1>
             <path param name 2>: <type 2>
@@ -40,8 +40,6 @@ from pydantic import BaseModel, validator
 from pydantic.main import ModelMetaclass
 from pydantic.utils import lenient_issubclass
 import textwrap
-
-from mackelab_toolbox.utils import Singleton  # Ensure only one Config instance
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +226,6 @@ class ValidatingConfigBase(BaseModel, metaclass=ValidatingConfigMeta):
             val = field.default  # NB: If no default is set, this returns `None`
         return val
 
-# TODO: Make this work with metaclass=Singleton
 class ValidatingConfig(ValidatingConfigBase, metaclass=ValidatingConfigMeta):
     """
     Augments Python's ConfigParser with a dataclass interface and automatic validation.
