@@ -61,7 +61,7 @@ from scipy import stats
 
 from .utils import ModuleList
 from .base import json_like, Serializable, ABCSerializable
-from .base_types import SerializedData
+from .base_types import SerializedData, Real
 
 from typing import Union, Any, Tuple, List, Dict
 from .numpy import Array, NPGenerator, RandomState
@@ -71,10 +71,20 @@ logger = logging.getLogger(__name__)
 # Define types used in Data objects, so classes wanting to extend this know what to import
 RVArg = Union[Array[np.number], float, int, Any, None]  # Union of all accepted types for distribution arguments
 RNGState = Union[None, NPGenerator, RandomState]
-# FIXME: Is there a public name for frozen data types ?
-RVFrozen = stats._distn_infrastructure.rv_frozen
-MvRVFrozen = stats._multivariate.multi_rv_frozen
-MvNormalFrozen = stats._multivariate.multivariate_normal_frozen
+# Scipy.stats does not provide a public name for the frozen dist types, and the
+# private paths depend on the version of scipy.
+RVFrozen = next(C for C in type(stats.norm()).mro() if "rv_frozen" in C.__name__.lower())  # NB: Ensure we don't use rv_continuous_frozen
+MvRVFrozen = next(C for C in type(stats.multivariate_normal()).mro() if "frozen" in C.__name__.lower() and "normal" not in C.__name__.lower())
+MvNormalFrozen = next(C for C in type(stats.multivariate_normal()).mro() if "frozen" in C.__name__.lower())
+# Similar for the Covariance subclasses, added in SciPy 1.10
+if hasattr(stats, "Covariance"):
+    stats_has_cov_class = True
+    stats_CovViaDiagonal = type(stats.Covariance.from_diagonal(1))
+    stats_CovViaCholesky = type(stats.Covariance.from_cholesky(1))
+    stats_CovViaEigenDecomposition = type(stats.Covariance.from_eigendecomposition(([1.], [[1.]])))
+    stats_CovViaPrecision = type(stats.Covariance.from_precision(1))
+else:
+    stats_has_cov_class = False
 # List of modules searched for distribution names; precedence is given to
 # modules earlier in the list
 # Note that modules can also be specified as strings (so "scipy.stats" would
@@ -132,7 +142,7 @@ class Distribution(Serializable):
 
         def __new__(cls, dist, *a, **kw):
             # Consider if a type annotation specifies Serialized[MvDistribution]
-            # and we previde the serialized form of MvNormalDistribution
+            # and we provide the serialized form of MvNormalDistribution
             # => We would to replace `cls` (set to MvDistribution.Data)
             #    by MvNormalDistribution.Data. This is what we do here:
             #    `data_type` is the `Data` subclass we need to use.
@@ -258,10 +268,51 @@ class MvNormalDistribution(MvDistribution, MvNormalFrozen):
         def encode(rv, include_rng_state=True):
             dist = rv._dist
             random_state = dist._random_state if include_rng_state else None
+            if stats_has_cov_class:  # scipy ≥1.10
+                cov = rv.cov_object  # Will be a subclass of stats.Covariance
+            else:  # scipy ≤1.9
+                cov = rv.cov
             # name, args, kwds, random_state
             return ("multivariate_normal", (),
-                    {'mean':rv.mean, 'cov':rv.cov}, random_state)
+                    {'mean':rv.mean, 'cov':cov}, random_state)
 
 UniDistribution.register(RVFrozen)
 MvDistribution.register(MvRVFrozen)  # This is only to provide the NotImplementedError message
 MvNormalDistribution.register(MvNormalFrozen)
+
+## Covariance class (SciPy ≥1.10)
+
+if stats_has_cov_class:
+
+    class Covariance(Serializable, stats.Covariance):
+        class Data(abc.ABC, SerializedData):
+            @abc.abstractmethod
+            def encode(cov_object): pass
+            @abc.abstractmethod
+            def decode(data): pass
+
+    class CovViaPrecision(Covariance, stats_CovViaPrecision):
+        class Data(SerializedData):
+            precision: Array[Real,2]
+            def encode(cov_object): return (cov_object._precision,)
+            def decode(data): return stats.Covariance.from_precision(data.precision)
+
+    class CovViaDiagonal(Covariance, stats_CovViaDiagonal):
+        class Data(SerializedData):
+            diagonal: Array[Real,1]
+            def encode(cov_object): return (np.diag(cov_object.covariance),)
+            def decode(data): return stats.Covariance.from_diagonal(data.diagonal)
+
+    class CovViaCholesky(Covariance, stats_CovViaCholesky):
+        class Data(SerializedData):
+            L: Array[Real,2]
+            def encode(cov_object): return (cov_object._factor,)
+            def decode(data): return stats.Covariance.from_cholesky(data.L)
+
+    class CovViaEigendecomposition(Covariance, stats_CovViaEigenDecomposition):
+        class Data(SerializedData):
+            eigenvalues: Array[Real, 1]
+            eigenvectors: Array[Real, 2]
+            def encode(cov_object): return (cov_object._w, cov_object._v)
+            def decode(data): return stats.Covariance.from_eigendecomposition(
+                (data.eigenvalues, data.eigenvectors))
