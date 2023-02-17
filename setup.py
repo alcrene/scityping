@@ -19,7 +19,7 @@ long_description = (here / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="scityping",  # Required
-    version="0.5.0a",  # Required
+    version="0.6.0a",  # Required
     description="Additional data types for science applications",  # Optional
     long_description=long_description,  # Optional
     long_description_content_type="text/markdown",  # Optional (see note above)
@@ -75,14 +75,14 @@ setup(
     # https://packaging.python.org/guides/distributing-packages-using-setuptools/#python-requires
     python_requires=">=3.7, <4",
 
-    install_requires=[],
+    install_requires=["pydantic"],
 
     extras_require={
         # "numpy": ["numpy", "blosc"],
         "dev"  : ["check-manifest"],
         "docs" : ["sphinx", "myst-parser"],
         "test" : ["coverage", "pytest",
-                  "numpy", "scipy", "blosc", "torch", "pint", "quantities", "pydantic",
+                  "numpy", "scipy", "blosc", "torch", "pint", "quantities",
                   ],
     },
 
