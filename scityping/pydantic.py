@@ -1,22 +1,22 @@
 """
 Tie-ins for pydantic which explicitely depend on pydantic types.
 Provides:
-- An extensible JSON encoder, which works with `base_types.Serializable` to
-  allow modules to define new types which work with smttask's serialization
-  infrastructure.
+- An scityping-aware "default" callable for `json.dump`, which allows it to
+  serialize `Serializable` types.
 - Drop-in replacements for `pydantic.BaseModel` and
-  `pydantic.dataclasses.dataclass`, which by default uses the extensible JSON
+  `pydantic.dataclasses.dataclass`, which by default uses the scityping JSON
   encoder provided by this package.
 """
-from typing import Any
+from typing import Any, Type
 from functools import partial
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic.generics import GenericModel as PydanticGenericModel
 from pydantic.main import (ModelMetaclass as PydanticModelMetaclass,
                            ValidationError as PydanticValidationError)
-from pydantic.json import custom_pydantic_encoder
-from pydantic.dataclasses import dataclass as pydantic_dataclass
-from .base import ABCSerializable, Serializable
+from pydantic.json import pydantic_encoder
+from pydantic.dataclasses import (dataclass as pydantic_dataclass,
+                                  _validate_dataclass as _pydantic_validate_dataclass)
+from .base import ABCSerializable, Serializable, json_like
 
 class ValidationError(PydanticValidationError):
     """
@@ -40,14 +40,27 @@ class ValidationError(PydanticValidationError):
 
 
 # Based off pydantic.json.custom_pydantic_encoder
-def extensible_encoder(obj: Any, base_encoder) -> Any:
+def scityping_encoder(obj: Any, base_encoder=pydantic_encoder) -> Any:
     if isinstance(obj, ABCSerializable):
         try:
-            return Serializable.json_encoder(obj)
+            # NB: The function pydantic.json.pydantic_encoder checks if the argument
+            #     is a BaseModel or dataclass, and if so, calls respectively .dict()
+            #     or asdict() to convert it to a dictionary.
+            #     *These are recursive calls*, which means that they reduce
+            #     every value inside them using only that function’s machinery:
+            #     nested calls to `pydantic_encoder` are *not* made, and in
+            #     particular `asdict` will ignore any custom encoders – it even
+            #     calls `deep_copy` on its contents.
+            # We emulate pydantic..pydantic_encoder here and call a recursive
+            # function to also reduce any nested Serializable values within `obj`.
+            # If we only reduce the `obj` but not its attributes,
+            # pydantic..pydantic_encoder may bypass `Serializable.reduce` for
+            # Serializable attributes.
+            return Serializable.deep_reduce(obj)
         except PydanticValidationError as e:
             # Pydantic's ValidationError uses obj.__name__ it its error message.
-            # With our SciTyping pattern, this results in all error message display `Data`
-            # as the object, which isn't very useful.
+            # With our SciTyping pattern, this results in all error message
+            # displaying `Data` as the object, which isn't very useful.
             # To improve the error message, we modify the model attached to
             # the exception so that its __name__ is actually __qualname__.
             # This monkey patching isin't especially clean, but it should be
@@ -87,8 +100,8 @@ class ModelMetaclass(PydanticModelMetaclass):
     """
     def __new__(mcs, name, bases, namespace, **kwargs):
         obj = super().__new__(mcs, name, bases, namespace, **kwargs)
-        # Wrap the json_encoder with extensible_encoder
-        encoder = partial(extensible_encoder, base_encoder=obj.__json_encoder__)
+        # Wrap the json_encoder with scityping_encoder
+        encoder = partial(scityping_encoder, base_encoder=obj.__json_encoder__)
         obj.__json_encoder__ = staticmethod(encoder)
         # Apply patch to allow their subclasses to override root validators.
         return remove_overridden_validators(obj)
@@ -100,13 +113,40 @@ class GenericModel(PydanticGenericModel, BaseModel):
     pass
 
 # C.f. pydantic.dataclasses
-def dataclass(_cls, **kwargs):
+def _validate_serializable_dataclass(cls: Type["DataclassT"], v: Any) -> "DataclassT":
+    if json_like(v, cls._registry):
+        return cls.validate(v)
+    else:
+        return _pydantic_validate_dataclass(cls, v)
+
+def dataclass(_cls=None, **kwargs):
+    ## Secondary code path: decorator with arguments ##
+    if _cls is None:
+        return partial(dataclass, **kwargs)
+
+    ## Primary code path: decorator without arguments ##
+
     # Validation in a Pydantic dataclass is performed by storing a BaseModel
-    # in the private attribute __pydantic_model__. Thus as in `ModelMetaclass`,
-    # we can first create the model, then the JSON encoder
+    # in the private attribute __pydantic_model__. Additional dunder methods are
+    # added to the dataclass: The validation logic for the class itself (i.e.
+    # what is used when the class is part of a BaseModel) is attached to __validate__.
+    # First we create the dataclass, then patch the validation & serialization
+    # logic so they recognize Serializable types
     dclass = pydantic_dataclass(_cls, **kwargs)
+
+    # Validation: Patch __pydantic_validate_values__ to recogize a Serialized `self`
+    #    Note that any Serializable *arguments* to the dataclass will already
+    #    be correctly deserialized. What we need to catch is the case where
+    #    `self` is both a dataclass and Serializable, and we are instantiating
+    #    it from serialized data.
+    #    Therefore we only need to wrap __validate__, not __pydantic_validate_values__
+    if issubclass(dclass, Serializable):
+        setattr(dclass, "__validate__", classmethod(_validate_serializable_dataclass))
+    
+    # JSON encoder: As in `ModelMetaclass`, we patch the __json_encoder__ attribute
     obj = dclass.__pydantic_model__
-    encoder = partial(extensible_encoder, base_encoder=obj.__json_encoder__)
+    encoder = partial(scityping_encoder, base_encoder=obj.__json_encoder__)
     obj.__json_encoder__ = staticmethod(encoder)
+
     # Return
     return dclass

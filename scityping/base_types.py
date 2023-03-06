@@ -40,18 +40,19 @@ import abc
 from types import SimpleNamespace
 from collections.abc import Callable as Callable_
 import typing
-from typing import Union, Any, Iterable, Sequence as _Sequence, Tuple, Dict
+from typing import Optional, Union, Any, Iterable, Tuple, Dict
 
 import numbers
 
 import logging
 logger = logging.getLogger(__name__)
 
-from .base import Serializable, ABCSerializable, json_like  # Serializable is not defined in this module to prevent import cycles
+from .base import Serializable, json_like  # Serializable is not defined in this module to prevent import cycles
 
 # dataclasses are used for the `Data` container associated to each type.
 # Use Pydantic dataclasses if available (they provide serialization/deserialization)
 # Otherwise, use builtin dataclasses
+# TODO: Don’t use pydantic dataclasses. Use normal ones, and include deserialization in `SerializedData`
 try:
     import pydantic
 except ModuleNotFoundError:
@@ -60,7 +61,8 @@ else:
     from .pydantic import dataclass
 
 __all__ = ["SerializedData", "Complex", "Range", "Slice",
-           "Number", "Integral", "Real"]
+           "Number", "Integral", "Real",
+           "Type", "GenericType", "PydanticGenericType"]
 
 # ###############
 # Helper base type for the nested `Data` classes
@@ -83,6 +85,15 @@ class SerializedData(metaclass=SerializedDataMeta):
     """
     @abc.abstractmethod
     def encode(value): raise NotImplementedError
+    ## Pydantic compatibility ##
+    # Note that instead of defining these methods, `SerializedData` could inherit
+    # from `BaseModel`, but that would make pydantic a hard dependency
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, value, field=None):  # 'field' only present for consistency
+        return cls(**value)
 
 # ###############
 # Support for builtin types:
@@ -91,21 +102,22 @@ class SerializedData(metaclass=SerializedDataMeta):
 # - slice
 # - type
 
+# TODO: Since they only contain plain data types, we could make the `Data` classes more lightweight by just subclassing `tuple`.
+
 class Complex(Serializable, complex):  # Using same name allows serializing original type
   class Data(SerializedData):
     real: float
     imag: float
     def encode(z): return z.real, z.imag
-    def decode(data): return complex(*data)
+    def decode(data): return complex(data.real, data.imag)
 
-@ABCSerializable.register   # NB: It is not permitted to subclass `range`
-class Range(Serializable):
+class Range(Serializable):  # NB: It is not permitted to subclass `range`
     class Data(SerializedData):
         start: int
         stop: Optional[int]=None
         step: Optional[int]=None
         def encode(r): return r.start, r.stop, r.step
-        def decode(data): return range(*data)  # Required since we don’t subclass `range`
+        def decode(data): return range(data.start, data.stop, data.step)  # Required since we don’t subclass `range`
 
     # # TODO
     # @classmethod
@@ -121,15 +133,15 @@ class Range(Serializable):
     #         type="array",
     #         description="('range', START, STOP, STEP)"
     #         )
+Range.register(range)
 
-@ABCSerializable.register   # NB: It is not permitted to subclass `slice`
-class Slice(Serializable):
+class Slice(Serializable):  # NB: It is not permitted to subclass `range`
     class Data(SerializedData):
         start: int
         stop: Optional[int]=None
         step: Optional[int]=None
         def encode(r): return r.start, r.stop, r.step
-        def decode(data): return slice(*data)  # Required since we don’t subclass `slice`
+        def decode(data): return slice(data.start, data.stop, data.step)  # Required since we don’t subclass `slice`
 
     # # TODO
     # @classmethod
@@ -145,6 +157,7 @@ class Slice(Serializable):
     #         type="array",
     #         description="('slice', START, STOP, [STEP])"
     #         )
+Slice.register(slice)
 
 # ###############
 # Overrides of typing types
@@ -152,7 +165,7 @@ class Slice(Serializable):
 #  Pydantic recognizes typing.Sequence, but treats it as a shorthand for
 #  Union[List, Tuple] (but with equal precedence). This means that other
 #  sequence types like `range` are not recognized.
-Sequence = Union[Range, _Sequence]
+Sequence = Union[Range, typing.Sequence]
 
 # ###############
 # Types based on numbers module
@@ -227,7 +240,7 @@ class Real(numbers.Real):
 #####################
 
 T = typing.TypeVar('T')
-class Type(Serializable, typing.Type[T], typing.Generic[T]):
+class Type(typing.Type[T], Serializable):  # NB: Serializable must come 2nd
     """
     Make types serializable; the serialization format is
         ('Type', <module name>, <type name>)

@@ -1,10 +1,21 @@
 import abc
 import logging
-from typing import Union, Type, Any, Callable, List, Tuple
-from collections.abc import Callable as Callable_, Sequence as Sequence_
-from dataclasses import asdict, is_dataclass
+from typing import ClassVar, Union, Type, Any, Callable, List, Tuple
+from collections.abc import (
+    Callable as Callable_, Sequence as Sequence_, Iterable as Iterable_,
+    Mapping as Mapping_)
+from dataclasses import fields, is_dataclass
 import inspect
 from .utils import get_type_key, TypeRegistry
+
+try:
+    from pydantic import BaseModel
+except ModuleNotFoundError:
+    # BaseModel is used only for isinstance checks – if pydantic is not loaded,
+    # those tests are False by default. Therefore instantiating a dummy class suffices
+    class BaseModel:
+        def __new__(cls):
+            raise RuntimeError("This dummy BaseModel is not meant to be instantiated.")
 
 logger = logging.getLogger(__name__)
 
@@ -128,13 +139,18 @@ class Serializable:
             if getattr(cls.Data, '__isabstractmethod__', False):
                 raise TypeError(f"Can't instantiate class {cls.__qualname__} with "
                                 "undefined `Data`.")
+            # Ensure that all subclasses define their own `Data` class
+            # (Simply inheriting Data from the parent class makes deserialization ambiguous.)
+            if any(cls.Data is getattr(C, "Data", None) for C in type.mro(cls)[1:]):
+                raise TypeError(f"The `Serializable` type {cls.__qualname__} must "
+                                "define its own `Data` class.")
             # Check that 'encode' is a classmethod (https://stackoverflow.com/a/19228282)
             if (not hasattr(cls.Data, "encode")
                   or not isinstance(cls.Data.encode, Callable_) 
                   # or not inspect.ismethod(cls.Data.encode)
                   # or cls.Data.encode.__self__ is not cls.Data  # NB: This does not prevent subclassing Data to reuse the encode
                   ):
-                raise TypeError(f"{cls} is a subclass of `Serializable`, and "
+                raise TypeError(f"{cls.__qualname__} is a subclass of `Serializable`, and "
                                 "therefore its nested `Data` class must define "
                                 "a class method `encode`.")
         ## Update subclass registries ##
@@ -153,9 +169,17 @@ class Serializable:
         # MAGIC: Register the lowest class in the MRO OF THE SAME NAME as a virtual subclass.
         #        This is to allow adding serializers for existing data types.
         name = cls.__qualname__.lower()
-        basecls = next(C for C in type.mro(cls)[::-1]
-                       if C.__qualname__.lower() == name)
-        if basecls is not cls:
+        try:
+            basecls = next(C for C in type.mro(cls)[::-1]
+                           if C.__qualname__.lower() == name
+                              and not issubclass(C, Serializable))
+            # Consider the case here where we define a plain Dataset in `base`, then
+            # define `C = Dataset(base.Dataset, torch...Dataset). We want to
+            # register the `torch...Dataset` with C. (Any parent which
+            # (is Serializable will already have been registered above.)
+        except StopIteration:
+            pass
+        else:
             cls.register(basecls)
 
     @classmethod
@@ -221,7 +245,7 @@ class Serializable:
                 if "generator" in str(value).lower():
                     json = subcls.json_encoder(value)
                     subcls.validate(json)
-                return subcls.validate(subcls.json_encoder(value))  # NB: json_encoder() doesn’t do the actual cast to string, so this isn’t too expensive
+                return subcls.validate(subcls.json_encoder(value))  # NB: json_encoder() doesn’t do the actual conversion to string, so this isn’t too expensive
 
         # Branch 3: Check if `value` is an instantiated `Data` object.
         #           If so, construct the target type from it.
@@ -229,7 +253,33 @@ class Serializable:
             subcls for subcls in set(cls._registry.values())  # We may have duplicate entries (e.g. point both 'Generator' and 'NPGenerator' to NPGenerator)
             if isinstance(subcls.Data, type) and isinstance(value, subcls.Data)]   # The first check is mostly for Data given as an abstractmethod/property in an abstract base class
         if types_with_matching_dataclasses:
-            assert len(types_with_matching_dataclasses) == 1, "There should never be more than one matching Data class."
+            #   `types_with_matching_dataclasses` may have multiple entries when we specialize a type.
+            #   For example, if we specialize `Website` into `CommerceWebsite`
+            #       class Website(Serializable):
+            #         class Data:
+            #           ...
+            #       class CommerceWebsite(Website):
+            #         class Data(Website.Data)
+            #           ...
+            #   both `Website` and `CommerceWebsite` will be in `BaseWebsite._cls_registry`.
+            #   Two different situations can cause multiple matches
+            #   1) `CommerceWebsite` does not define a nested `Data` at all and we call
+            #          Website.validate(website_data: Website.Data)
+            #      This is prohibited by __init_subclass__ because it cannot be resolved.
+            #   2) `CommerceWebsite` subclasses `Website.Data`, as in the example above, and we call
+            #          Website.validate(website_data: CommerceWebsite.Data)
+            #      In this case we want to deserialize to the most specific type: CommerceWebsite
+            #   Only when there is multiple inheritance between Serializable types should we need to raise an error.
+
+            # # Remove matching types which have strict subclasses
+            # for C in types_with_matching_dataclasses[:]:
+            #     if any(issubclass(D, C)
+            #            for D in types_with_matching_dataclasses if D is not C):
+            #         types_with_matching_dataclasses.remove(C)
+            assert len(types_with_matching_dataclasses) == 1, \
+                f"Unable to resolve the target data type for value of type {type(value)}; " \
+                f"all these Serializable types match: {types_with_matching_dataclasses}." \
+                "This can happen if the types’ Data classes have diamond inheritance"
             targetT = types_with_matching_dataclasses[0]
             decoder = getattr(targetT.Data, 'decode', None)
             if decoder:
@@ -240,8 +290,20 @@ class Serializable:
                 # (e.g. `range` instead of `Range`) without causing an infinite
                 # loop (since then the code does not exit on branch #1).
             else:
-                kwds = asdict(value) if is_dataclass(value) else value.dict()
-                    # Support both dataclass and Pydantic BaseModel for the nested Data class
+                # We support dataclass, Pydantic BaseModel and mappings for the nested Data class
+                if is_dataclass(value):
+                    # Make a shallow copy of the fields (`dataclasses.asdict` copies everything, and recurses into dataclasses, dicts, lists and tuples)
+                    kwds = {field.name: getattr(value, field.name) for field in fields(value)}
+                elif hasattr(value, "__fields__"):
+                    # Assume a Pydantic BaseModel
+                    kwds = dict(value)
+                elif hasattr(value, "items"):
+                    kwds = dict(value.items())
+                else:
+                    raise TypeError(f"Nested `Data` type for {targetT.__qualname__} "
+                                    "should be either a dataclass, a Pydantic BaseModel "
+                                    f"or a mapping. inheritance for {targetT.__qualname__}:\n"
+                                    f"{targetT.Data.mro()}.")
                 obj = targetT(**kwds)
                 # If targetT has an overridden `validate`, ensure it is executed on the serialized data
                 # If `validate` is not overridden, this will exit via branch #1
@@ -296,7 +358,7 @@ class Serializable:
                             # f"Attempting `{cls}(<value>)` raised the "
                             # f"following error:\n{e}")
     @classmethod
-    def json_encoder(cls, value, *args, **kwargs) -> Tuple[str, "Data"]:
+    def json_encoder(cls, value, **kwargs) -> Tuple[str, "Data"]:
         """
         Generic custom serializer. All serialized objects follow the format
         ``(type name, serialized data)``. For example,
@@ -309,8 +371,12 @@ class Serializable:
 
         Additional positional and keyword arguments are passed on to
         ``S.Data.encode(*args, **kwargs)``, where ``S`` is the class used to
-        serialize `value`. It is the user's responsibility to ensure that these
-        are valid for the inferred encoder.
+        serialize `value`. Only `kwargs` which match an argument in the signature
+        of `S.Data.encode` are passed on; this allows `kwargs` to contain encoding
+        arguments for different encoders, as long as all encoders use different
+        argument names. (The use case for this filtering is `deep_reduce`, which
+        through recursion may encode many objects but `kwargs` can only be
+        specified once.)
         """
         # This first line deals with the case when `json_encoder` is called with
         # the parent class (typically `Serializable`), or when the serializer
@@ -330,24 +396,24 @@ class Serializable:
                            f"Attempted to serialize using: {cls}.json_encoder\n"
                            f"Registered types for this class: {cls._registry.keys()}")
 
-        data = serializer_cls.Data.encode(value, *args, **kwargs)
+        # Call Data.encode, passing any parameters from kwargs that match a parameter in Data.encode.
+        if kwargs:
+            encode_kwargs = inspect.signature(serializer_cls.Data.encode).parameters.keys()
+            kwargs = {kw: arg for kw, arg in kwargs.items() if kw in encode_kwargs}
+        data = serializer_cls.Data.encode(value, **kwargs)
+
+        # NB: To reduce boilerplate, we allow `encode` to return a tuple or dict
+        # These are respectively treated as positional or keyword args to Data
         if not isinstance(data, serializer_cls.Data):
-            # To reduce boilerplate, we allow `encode` to return a tuple or dict
-            # These are respectively treated as positional or keyword args to Data
             if isinstance(data, tuple):
-                try:
+                if issubclass(serializer_cls.Data, BaseModel):
+                    # As a convenience, if Data class is a BaseModel, it has a
+                    # `__fields__` attribute we can use to construct an argument dictionary
+                    fields = serializer_cls.Data.__fields__
+                    kwds = {k: v for k, v in zip(fields, data)}
+                    data = serializer_cls.Data(**kwds)
+                else:
                     data = serializer_cls.Data(*data)
-                except TypeError as e:
-                    if e.args[0].startswith("__init__() takes exactly 1 positional argument"):
-                        # We can end up here if we try to initialize a Pydantic BaseModel with positional arguments.
-                        # As a convenience, if Data class has a `__fields__` attribute, we will use that to construct a dictionary
-                        fields = getattr(serializer_cls.Data, "__fields__", None)
-                        if fields is None:
-                            raise e  # We are not in a BaseModel - re-raise the original error
-                        kwds = {k: v for k, v in zip(fields, data)}
-                        data = serializer_cls.Data(**kwds)
-                    else:
-                        raise e
 
             elif isinstance(data, dict):
                 data = serializer_cls.Data(**data)
@@ -360,26 +426,113 @@ class Serializable:
                 #     f"dict, these must be arguments to {serializer_cls.__qualname__}.Data.")
         return (get_type_key(serializer_cls), data)
 
+    reduce = json_encoder
 
-class SerializedGen():
-    """
-    Convenience constructor for a type describing serialized objects.
-    If ``MyType`` is a subclass of `Serializable`, then ``Serialized[MyType]``
-    returns the type ``Tuple[str, T.Data]``.
-    """
-    # Make a singleton
-    __instance = None
-    def __new__(cls):
-        return SerializedGen.__instance or super().__new__(cls)
+    @classmethod
+    def deep_reduce(cls, value, **kwargs) -> Tuple[str, Union[dict,tuple]]:
+        """
+        Call `reduce` recursively, converting each result to either a tuple
+        or a dictionary. The returned value therefore only contains types
+        which can be serialized without `scityping`.
+        If certain encoders (i.e. the `Data.encode` methods) take additional
+        parameters, these can be passed as keyword arguments. To avoid
+        unexpected values, different encoders should take care to use different
+        argument names.
+        """
+        type_key, data = cls.reduce(value, **kwargs)
+
+        if is_dataclass(data):
+            reduced_type = dict
+            data_iter = ((k,getattr(data,k)) for k in data.__dataclass_fields__)
+        elif isinstance(data, BaseModel):
+            reduced_type = dict
+            data_iter = data
+        elif isinstance(data, Mapping):
+            reduced_type = dict
+            data_iter = data.items()
+        elif isinstance(data, Iterable_):
+            reduced_type = tuple
+            data_iter = data
+        else:
+            raise TypeError(f"`{cls.__qualname__}.reduce` returned an object of unexpected "
+                            f"type '{type(data).__qualname__}', which is incompatible with "
+                            f"`{cls.__qualname__}.deep_reduce`.")
+
+        if reduced_type is dict:
+            reduced_data = {k: cls.deep_reduce(v) if isinstance(v, Serializable)
+                               else v
+                            for k, v in data_iter}
+        else:
+            reduced_data = tuple(cls.deep_reduce(v) if isinstance(v, Serializable)
+                                 else v
+                                 for v in data_iter)
+
+        return (type_key, reduced_data)
+
+
+class SerializedMeta(type):
+    # # Make a singleton
+    # __instance = None
+    # def __new__(cls):
+    #     return SerializedGen.__instance or super().__new__(cls)
     # Actual implementation
-    def __getitem__(self, T: Type[Serializable]) -> Type:
-        if not isinstance(T, type):
-            raise TypeError("Serializable[…] only accepts types which are "
+    def __getitem__(cls, T: Type[Serializable]) -> Type:
+        if cls is not Serialized:
+            raise RuntimeError("Type definitions of the form `Serialized[…][…]` "
+                               "are not supported.")
+        elif not isinstance(T, type):
+            raise TypeError("Serialized[…] only accepts types which are "
                             f"subclasses of Serializable. {T} is not even a type.")
         elif not issubclass(T, Serializable):
-            raise TypeError("Serializable[…] only accepts types which are "
+            raise TypeError("Serialized[…] only accepts types which are "
                             "subclasses of Serializable. "
                             f"{T} does not subclass Serializable.")
-        return Tuple[str, T.Data]
+        # return Tuple[str, T.Data]
+        return SerializedMeta(f"Serialized{T.__name__}", (Serialized,),
+                              {"_serialized_type": T, "__slots__": ()})
 
-Serialized = SerializedGen()
+class Serialized(tuple, metaclass=SerializedMeta):
+    """
+    Constructor for a type describing serialized objects.
+    If ``MyType`` is a subclass of `Serializable`, then ``Serialized[MyType]``
+    returns a type which is essentially ``Tuple[str, T.Data]`` but which also
+    correctly validates serialized data from subclasses of ``MyType``. 
+    """
+    __slots__ = ()
+    _serialized_type: ClassVar
+
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, value):
+        # Raise error if value is not of correct type
+        if ( not isinstance(value, Sequence_) or len(value) != 2 or not isinstance(value[0], str) ):
+            value_str = str(value)
+            if len(value_str) > 150: value_str = value_str[:149] + "…"
+            raise TypeError(f"A value matching Serialized[{cls._serialized_type.__qualname__}] "
+                            "should be a tuple of length two, where the first element is a string. "
+                            f"Received:\n {value_str}")
+        # Determine the target type for the data by inspecting the first arg.
+        # This might not be the same as `_serialized_type`: it could a subclass
+        targetT = cls._serialized_type._registry.get(value[0])
+        if targetT is None:
+            raise TypeError(f"'{value[0]}' does not match any of the subtypes "
+                            f"registered to {cls.__qualname__}.")
+        # targetT.Data might be a BaseModel, dataclass, TypedDict, etc.
+        # Also value[1] might be serialized or not.
+        # So we inspect the type and value to determine how to return the tuple (key, Data)
+        if isinstance(value[1], targetT.Data):
+            # Nothing to do
+            return cls(value)
+        elif hasattr(targetT.Data, "validate"):
+            return cls((value[0], targetT.Data.validate(value[1])))
+        elif hasattr(targetT.Data, "__get_validators__"):
+            data = value[1]
+            for validator in targetT.Data.__get_validators__():
+                data = validator(data)
+            return cls((value[0], data))
+        elif isinstance(value[1], dict):
+            return cls((value[0], targetT.Data(**value[1])))
+        elif isinstance(value[1], Iterable_):
+            return cls((value[0], targetT.Data(*value[1])))

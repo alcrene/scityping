@@ -73,7 +73,7 @@ def torch_module_state_decoder(v: Tuple[str, Dict[str,str]]):
     encoded_state = v[1]
     # State is encoded as serialized arrays, so for each we have to:
     # 1. Deserialize the array  2. Convert to a pytorch tensor
-    state = {param: torch.tensor(Array.validate(encoded_array))
+    state = {param: torch.tensor(Array.Data.decode(Array.Data(**encoded_array)))
              for param, encoded_array in encoded_state.items()}
     return state
 
@@ -115,8 +115,8 @@ def torch_module_state_encoder(
     if not isinstance(v, nn.Module):
         raise TypeError("This JSON encoder is only intended for PyTorch "
                         f"modules (received value of type {type(v)}).")
-    state = {param: Array.json_encoder(tensor.cpu().detach().numpy(),
-                                       compression=compression, encoding=encoding)
+    state = {param: Array.Data.encode(tensor.cpu().detach().numpy(),
+                                      compression=compression, encoding=encoding)
             for param, tensor in v.state_dict().items()}
 
     return ("TorchModuleState", state)

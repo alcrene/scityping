@@ -15,7 +15,8 @@ import abc
 from typing import Union, Any, Tuple
 import pint
 
-from .base_types import ABCSerializable, Serializable, SerializedData, Number
+from .base import ABCSerializable, Serializable
+from .base_types import SerializedData, Number
 
 UnitRegistry = pint.UnitRegistry
 ApplicationRegistry = getattr(pint, 'ApplicationRegistry',

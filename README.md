@@ -182,15 +182,19 @@ Foo(z=3+4j).json()
 ```
 Note that this works even if `Complex` is defined after `Foo`, without any patching of `Foo`’s list of `__json_encoders__`.[^post-type-def]
 
+**Important** The nested `Data` class must provide type-aware deserialization logic. The easiest way to do this is to make use either `scityping.pydantic.BaseModel` or `scityping.pydantic.dataclass`. Note that the builtin `dataclasses.dataclass` does *not* perform any parsing of its arguments by default, so simply wrapping the `Data` class with `dataclasses.dataclass` is not sufficient.
+
 [^post-type-def]: The corollary of this is that it makes it easier for modules to arbitrarily modify how types are serialized by *already imported* modules. Thus by adding a new serializer, a new package may break a previously working one. Also, while the hooks for extending type suport don't increase the attack surface vis-à-vis a malicious actor (imported Python modules are already allowed to inject code wherever they please), they might make things easier for them.
 
 ## Performance
+
+### In usage with Pydantic
 
 For types serialized with Pydantic, this adds a single `isinstance` check for each serialization call, which should be negligeable.[^negligeable-comp-cost]
 
 Serialization with `Serializable` is not as aggressively tested with regards to performance and may be a bit slower.
 
-*De*serialization of `Serializable` types may be in some cases be faster: Pydantic fields with `Union` types execute a try-catch for each possible type, keeping the first successful result. Since `Serializable` includes the target type in serialized data, the correct data type is generally attempted first.
+*De*serialization of `Serializable` types in general will be slower, although this should only be noticeable if deserialization is a big part of your application. In some cases it may even be faster: Pydantic fields with `Union` types execute a try-catch for each possible type, keeping the first successful result. Since `Serializable` includes the target type in serialized data, the correct data type is generally attempted first.
 
 In general, within scientific applications these performance considerations should not matter: data is typically serialized/deserialized only at the beginning/end of a computation, which is not where the speed bottlenecks usually are. 
 
