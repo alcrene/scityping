@@ -60,7 +60,7 @@ except ModuleNotFoundError:
 else:
     from .pydantic import dataclass
 
-__all__ = ["SerializedData", "Complex", "Range", "Slice",
+__all__ = ["SerializedData", "NoneType", "Complex", "Range", "Slice",
            "Number", "Integral", "Real",
            "Type", "GenericType", "PydanticGenericType"]
 
@@ -94,6 +94,23 @@ class SerializedData(metaclass=SerializedDataMeta):
     @classmethod
     def validate(cls, value, field=None):  # 'field' only present for consistency
         return cls(**value)
+
+# ###############
+# Special type which only accepts the value `None`; used for deactivating
+# fields in a subclass
+
+class NoneType:
+    """
+    A Pydantic compatible 'type' which only accepts None.
+    Use case: deactivating options of a parent class by forcing them to be None
+    """
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    @classmethod
+    def validate(cls, v, field):
+        assert v is None, f"Field '{field.name}' of '{cls.__qualname__}' accepts only the value `None`."
+        return None
 
 # ###############
 # Support for builtin types:

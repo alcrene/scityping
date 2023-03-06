@@ -35,7 +35,8 @@ unprepared types still being a `ForwardRef`.
     from scipy import stats
     from pydantic.dataclasses import dataclass
 
-    from scityping.scipy import RVArg, RNGState   # Required to resolve forward refs
+    from scityping.scipy import Optional, Dict, Tuple, Array,  RVArg, RNGState   # Required to resolve forward refs
+    from scityping.scipy import Union, NoneType, Covariance  # Required to resolve forward refs for multivariate distributions
     from scityping.scipy import MvDistribution
 
     MvT = stats._multivariate.multivariate_t_frozen
@@ -55,15 +56,16 @@ from __future__ import annotations
 
 import abc
 import logging
+from dataclasses import asdict
 
 import numpy as np
 from scipy import stats
 
 from .utils import ModuleList
 from .base import json_like, Serializable, ABCSerializable
-from .base_types import SerializedData, Real
+from .base_types import SerializedData, NoneType, Real
 
-from typing import Union, Any, Tuple, List, Dict
+from typing import Optional, Union, Any, Tuple, List, Dict
 from .numpy import Array, NPGenerator, RandomState
 
 logger = logging.getLogger(__name__)
@@ -83,6 +85,7 @@ if hasattr(stats, "Covariance"):
     stats_CovViaCholesky = type(stats.Covariance.from_cholesky(1))
     stats_CovViaEigenDecomposition = type(stats.Covariance.from_eigendecomposition(([1.], [[1.]])))
     stats_CovViaPrecision = type(stats.Covariance.from_precision(1))
+    stats_CovViaPSD = stats._covariance.CovViaPSD   # Does not seem to have a public construction API
 else:
     stats_has_cov_class = False
 # List of modules searched for distribution names; precedence is given to
@@ -113,7 +116,7 @@ class Distribution(Serializable):
         dist: str
         args: Tuple[RVArg, ...]
         kwds: Dict[str, RVArg]
-        rng_state: RNGState=None
+        rng_state: Optional[RNGState]=None
 
         @staticmethod
         @abc.abstractmethod
@@ -229,7 +232,22 @@ class Distribution(Serializable):
         else:
             return data_types[0]
 
-## Concrete subclasses ##
+## Covariance class (SciPy ≥1.10)
+
+if stats_has_cov_class:
+    class Covariance(Serializable, stats.Covariance):
+        class Data(abc.ABC, SerializedData):
+            @abc.abstractmethod
+            def encode(cov_object): raise NotImplementedError
+            @abc.abstractmethod
+            def decode(data): raise NotImplementedError
+else:
+    # Dummy class so annotations don’t become ForwardRefs
+    class Covariance(Serializable):
+        class Data(SerializedData):
+            def encode(cov): raise NotImplementedError
+
+## Concrete Distribution subclasses ##
 
 class UniDistribution(Distribution, RVFrozen):
     class Data(Distribution.Data):
@@ -262,6 +280,12 @@ class MvDistribution(Distribution, MvRVFrozen):
                 f"not yet been done for '{rv._dist}'.")
 class MvNormalDistribution(MvDistribution, MvNormalFrozen):
     class Data(MvDistribution.Data):
+        # dist: str
+        args: NoneType=None
+        kwds: NoneType=None
+        # rng_state: Optional[RNGState]=None
+        mean: Array[np.inexact, 1]=None                    # Required: default value because dataclass doesn’t allow positional args after optional ones
+        cov: Union[Covariance, Array[np.inexact, 2]]=None  # Required: default value because dataclass doesn’t allow positional args after optional ones
         @staticmethod
         def valid_distname(dist_name: str) -> bool:
             return dist_name == "multivariate_normal"
@@ -273,23 +297,46 @@ class MvNormalDistribution(MvDistribution, MvNormalFrozen):
             else:  # scipy ≤1.9
                 cov = rv.cov
             # name, args, kwds, random_state
-            return ("multivariate_normal", (),
-                    {'mean':rv.mean, 'cov':cov}, random_state)
+            return dict(dist="multivariate_normal",
+                        mean=rv.mean, cov=cov, rng_state=random_state)
+            # return ("multivariate_normal", (),
+            #         {'mean':rv.mean, 'cov':cov}, random_state)
+        def decode(data):
+            mv_normal = stats.multivariate_normal(mean=data.mean, cov=data.cov)
+            mv_normal.random_state = data.rng_state
+            return mv_normal
 
 UniDistribution.register(RVFrozen)
 MvDistribution.register(MvRVFrozen)  # This is only to provide the NotImplementedError message
 MvNormalDistribution.register(MvNormalFrozen)
 
-## Covariance class (SciPy ≥1.10)
+## Concrete Covariance subclasses ##
+
+class _PSD(Serializable, stats._multivariate._PSD):
+    # NB: It would be more efficient to store only _M and the __init__ args
+    #    (cond, rcond, lower, check_finite and allow_singular)
+    #    However I don’t know how to recover those init args from a PSD instance.
+    class Data(SerializedData):
+        M: Array[np.inexact, 2]  # Don’t use '_M', otherwise Pydantic won’t deserialize
+        eps: float
+        rank: int
+        log_pdet: float
+        V: Array[np.inexact, 2]
+        U: Array[np.inexact, 2]
+        def encode(psd: stats._PSD):
+            return (psd._M, psd.eps, psd.rank, psd.log_pdet, psd.V, psd.U)
+        def decode(data: "_PSD.Data") -> _PSD:
+            # We stored all the attributes: we want to skip __init__ entirely
+            # HACK: This may break if the internals of _PSD change
+            psd = object.__new__(stats._multivariate._PSD)
+            datadict = asdict(data)
+            datadict["_M"] = datadict["M"]  # relabel 'M' -> '_M'
+            del datadict["M"]
+            psd.__dict__.update(**datadict)
+            psd._pinv    = None  # Lazily computed attribute
+            return psd
 
 if stats_has_cov_class:
-
-    class Covariance(Serializable, stats.Covariance):
-        class Data(abc.ABC, SerializedData):
-            @abc.abstractmethod
-            def encode(cov_object): pass
-            @abc.abstractmethod
-            def decode(data): pass
 
     class CovViaPrecision(Covariance, stats_CovViaPrecision):
         class Data(SerializedData):
@@ -316,3 +363,10 @@ if stats_has_cov_class:
             def encode(cov_object): return (cov_object._w, cov_object._v)
             def decode(data): return stats.Covariance.from_eigendecomposition(
                 (data.eigenvalues, data.eigenvectors))
+
+    class CovViaPSD(Covariance, stats_CovViaPSD):
+        class Data(SerializedData):
+            psd: _PSD
+            def encode(cov_object): return cov_object._psd
+            def decode(data): return stats_CovViaPSD(data.psd)
+
