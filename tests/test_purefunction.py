@@ -1,5 +1,7 @@
 import pytest
 from functools import partial
+import operator
+import numpy as np
 from pydantic import ValidationError
 import scityping
 from scityping.base import Serializable
@@ -92,3 +94,29 @@ def test_compositepurefunction():
     foo = Foo(f=w)
     foo2 = Foo.parse_raw(foo.json())
     assert all(foo.f(x) == foo2.f(x) for x in [3, 5, 8, 100, 101])
+
+def test_special_functions():
+    """
+    Test built-in serialization support for common functions like
+    NumPy ufuncs and array functions.
+    """
+    # ufunc: np.sin, np.add
+    # array function: np.max, np.clip
+    for fn in [operator.abs,
+               np.sin,
+               np.max,
+               partial(np.add, 3),
+               partial(np.clip, a_min=-1, a_max=2),
+               partial(operator.pow, 2)
+               ]:
+        purefn = PureFunction(fn)
+        test_vals = [-10, -0.3, 0, 1, 5]
+        # Test reduction/reconstruction with Data object
+        data = Serializable.reduce(purefn)
+        purefn2 = Serializable.validate(data)
+        assert all(purefn(x) == purefn2(x) for x in test_vals)
+        # Test full round-trip serialization to JSON
+        foo = Foo(f=purefn)
+        foo2 = Foo.parse_raw(foo.json())
+        assert all(purefn(x) == foo.f(x) == foo2.f(x) for x in test_vals)
+

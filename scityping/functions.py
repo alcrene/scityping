@@ -5,9 +5,12 @@ import importlib
 import inspect
 import operator
 import functools
+from collections.abc import Callable as Callable_
 
 from typing import Union, Callable, List, Sequence, _Final
 from types import new_class
+
+import numpy  # TODO: Make numpy import optional
 
 from .base import Serializable
 from .base_types import SerializedData, Number
@@ -16,6 +19,20 @@ from .numpy import Array  # TODO: Make numpy import optional
 PlainArg = Union[Number, str, Array]
 
 __all__ = ["PlainArg", "PureFunction", "PartialPureFunction", "CompositePureFunction"]
+
+# Functions from these modules are not serialized by storing their source,
+# but simply the name is saved. There are a few reasons to do this:
+# - C functions, like the builtins, cannot be serialized by inspecting their source.
+# - NumPy ufuncs similarly cannot be serialized by inspection
+# - NumPy array functions technically could, but because of the overloading the
+#   dependencies are quite complicated.
+# - Serializing just the name is much more compact, and arguably more reliably
+#   for mature functions like those in core Python or NumPy
+pure_function_set = {fn: module.__name__
+                     for module in [operator, numpy]
+                     for fn in module.__dict__.values()
+                     if isinstance(fn, Callable_)
+                     }
 
 # TODO: Instead of "trust_all_inputs", use a whitelist of safe module (as in scityping.scipy.Distribution)
 # TODO: Serializing partial(PureFunction(g)) should be the same as PartialPureFunction(partial(g)), for consistent hashes
@@ -153,9 +170,9 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
         def encode(purefunc: PureFunction) -> str:
             func = purefunc.func
             if isinstance(func, PureFunction):
-                return func
+                return func,
             else:
-                return serialize_function(purefunc.func)
+                return serialize_function(purefunc.func),
         def decode(data: PureFunction.Data) -> PureFunction:
             # return PureFunction.deserialize(data.func)
             cls = PureFunction
@@ -197,12 +214,15 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
     def __init__(self, func):
         if hasattr(self, 'func'):
             # This is our second pass through __init__, probably b/c of __new__redirect
-            assert hasattr(self, '__signature__')
+            # assert hasattr(self, '__signature__')
             return
         self.func = func
         # Copy attributes like __name__, __module__, ...
         functools.update_wrapper(self, func)
-        self.__signature__ = inspect.signature(func)
+        try:
+            self.__signature__ = inspect.signature(func)
+        except ValueError:  # Some functions, like numpy.sin, don’t support `signature`
+            pass
     def __call__(self, *args, **kwargs):
         return self.func(*args, **kwargs)
 
@@ -326,6 +346,7 @@ class PartialPureFunction(PureFunction):
     """
     class Data(SerializedData):
         func: Union[str,PureFunction]
+        args: tuple
         kwargs: dict
 
         @classmethod
@@ -349,7 +370,7 @@ class PartialPureFunction(PureFunction):
                 return (func, {})  # If `func` wraps a partial, its keywords will be taken care of at a deeper level
             elif not isinstance(func, functools.partial):
                 # Serialize the function and store an empty dict of bound arguments
-                return (serialize_function(func), {})
+                return (serialize_function(func), (), {})
                 # # Make a partial with empty dict of bound arguments
                 # func = functools.partial(func)
             elif isinstance(func.func, functools.partial):
@@ -358,9 +379,9 @@ class PartialPureFunction(PureFunction):
             else:
                 # At this point we know that `func` is a partial
                 if isinstance(func.func, PureFunction):
-                    return (func.func, func.keywords)
+                    return (func.func, func.args, func.keywords)
                 else:
-                    return (serialize_function(func.func), func.keywords)
+                    return (serialize_function(func.func), func.args, func.keywords)
 
         def decode(data: PartialPureFunction.Data) -> PureFunction:
             cls = PartialPureFunction
@@ -375,7 +396,7 @@ class PartialPureFunction(PureFunction):
             #     raise NotImplementedError(
             #         "Was a partial function saved from function decorated with "
             #         "a PureFunction decorator ? I haven't decided how to deal with this.")
-            return PartialPureFunction(functools.partial(func, **data.kwargs))
+            return PartialPureFunction(functools.partial(func, *data.args, **data.kwargs))
 
     # def __init__(self, partial_func):
     #     super().__init__(partial_func)
@@ -611,9 +632,12 @@ def serialize_function(f) -> str:
        extracting the function and calling `serialize_function` on it.
     """
 
-    if f in operator.__dict__.values():
-        "Special case serializing builtin functions"
-        return f"operator.{f.__name__}"
+    if f in pure_function_set:
+        # Special case serializing of standard pure functions
+        return f"{pure_function_set[f]}.{f.__name__}"  # Only support __name__: In `deserialize_function`, we split on the last period to get the function name
+    # if f in operator.__dict__.values():
+    #     "Special case serializing builtin functions"
+    #     return f"operator.{f.__name__}"
     elif hasattr(f, '__func_src__'):
         return f.__func_src__
     elif isinstance(f, PureFunction):
@@ -687,9 +711,15 @@ def deserialize_function(
     """
     msg = ("Cannot decode serialized function. It should be a string as "
            f"returned by inspect.getsource().\nReceived value:\n{s}")
-    # First check if this is a builtin; if so, exit early
-    if isinstance(s, str) and s.startswith("operator."):
-        return getattr(operator, s[9:])
+    # First check if this is a special-cased function; if so, exit early
+    if isinstance(s, str) and " " not in s:  # Any function def should have white space, and no identifier can have white space
+        modname, fname = s.rsplit(".", 1)       
+        if modname not in sys.modules:
+            raise RuntimeError(f"Cannot deserialize function '{s}': "
+                               f"module {modname} is not imported.")
+        return getattr(sys.modules[modname], fname)
+    # if isinstance(s, str) and s.startswith("operator."):
+    #     return getattr(operator, s[9:])
     # Not a builtin: must deserialize string
     if not config.trust_all_inputs:
         raise UnsafeDeserializationError(
