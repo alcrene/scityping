@@ -19,8 +19,8 @@ long_description = (here / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="scityping",  # Required
-    version="0.6.0a",  # Required
-    description="Additional data types for science applications",  # Optional
+    version="0.6.0",  # Required
+    description="Serializable data types for science applications",  # Optional
     long_description=long_description,  # Optional
     long_description_content_type="text/markdown",  # Optional (see note above)
     # # This field corresponds to the "Home-Page" metadata field:
@@ -58,7 +58,7 @@ setup(
     # Note that this is a list of additional keywords, separated
     # by commas, to be used to assist searching for the distribution in a
     # larger catalog.
-    keywords="sample, setuptools, development",  # Optional
+    keywords="serialization, scientific computing, reproducibility",  # Optional
     # You can just specify package directories manually here if your project is
     # simple. Or you can use find_packages().
     #
