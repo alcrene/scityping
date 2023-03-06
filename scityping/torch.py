@@ -65,7 +65,7 @@ Module = TorchModule
 # TODO: Package into a TorchModuleState class
 def torch_module_state_decoder(v: Tuple[str, Dict[str,str]]):
     """
-    Decode a torch module state serialized with `torch_module_state_json_encoder`.
+    Decode a torch module state serialized with `torch_module_state_reduce`.
     """
     if not json_like(v, "TorchModuleState"):
         raise TypeError("Argument is not a serialized torch state. "

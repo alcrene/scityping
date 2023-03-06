@@ -31,7 +31,7 @@ def json_like(value: Any, type_str: Union[str,List[str]],
               case_sensitive: bool=False):
     """
     Convenience fonction for checking whether a serialized value might be a
-    object serialized with `scityping.base.json_encoder`. 
+    object serialized with `scityping.base.reduce`. 
     :param:value: The value for which we want to determine if it is a
         JSON-serialized object.
     :param:type_str: The type string of the type we are attempting to
@@ -51,7 +51,7 @@ def json_like(value: Any, type_str: Union[str,List[str]],
 # ###############
 # Base class for custom serializable types
 
-# NB: In pydantic.py, we associate the `Serializable.json_encoder` to the *abstract* base class `ABCSerializable`.
+# NB: In pydantic.py, we associate the `Serializable.reduce` to the *abstract* base class `ABCSerializable`.
 class ABCSerializable(abc.ABC):
     """
     This is the class added to the list of JSON encoders.
@@ -67,7 +67,7 @@ class ABCSerializable(abc.ABC):
     # Registry of types which are registered as virtual subclasses of ABCSerializable.
     # This mirrors but differs from Serializable._registry: Both have the same
     # keys, but the values in the latter are true subclasses of Serializable
-    # (and so provide `Data`, `json_encoder`, `__get_validators__`, etc.)
+    # (and so provide `Data`, `reduce`, `__get_validators__`, etc.)
     # It should always be true that an entry in Serializable._registry is a
     # non-strict subclass of the corresponding entry in ABCSerializable._registry.
     # NB: Keys are the *types* (values) of Serializable._registry; this is to
@@ -203,7 +203,7 @@ class Serializable:
         yield cls.validate
 
     def __reduce__(self):  # Pickle serialization hook
-        return (self.validate, (self.json_encoder(self),))
+        return (self.validate, (self.reduce(self),))
 
     @classmethod
     def validate(cls, value, field=None):  # `field` not currently used: only there for consistency
@@ -243,9 +243,9 @@ class Serializable:
                 # Recast value to be of type 'cls'
                 subcls = next(iter(matching_basesubclasses))
                 if "generator" in str(value).lower():
-                    json = subcls.json_encoder(value)
+                    json = subcls.reduce(value)
                     subcls.validate(json)
-                return subcls.validate(subcls.json_encoder(value))  # NB: json_encoder() doesn’t do the actual conversion to string, so this isn’t too expensive
+                return subcls.validate(subcls.reduce(value))  # NB: reduce() doesn’t do the actual conversion to string, so this isn’t too expensive
 
         # Branch 3: Check if `value` is an instantiated `Data` object.
         #           If so, construct the target type from it.
@@ -326,7 +326,7 @@ class Serializable:
                                 f"    Value received: {value}\n\n")
 
             targetT = cls._registry[value[0]]
-            if isinstance(value[1], targetT.Data):  # This can happen if we call `json_encoder` but never actually convert the result to string
+            if isinstance(value[1], targetT.Data):  # This can happen if we call `reduce` but never actually convert the result to string
                 data = value[1]
             elif isinstance(value[1], tuple):
                 data = targetT.Data(*value[1])
@@ -358,7 +358,7 @@ class Serializable:
                             # f"Attempting `{cls}(<value>)` raised the "
                             # f"following error:\n{e}")
     @classmethod
-    def json_encoder(cls, value, **kwargs) -> Tuple[str, "Data"]:
+    def reduce(cls, value, **kwargs) -> Tuple[str, "Data"]:
         """
         Generic custom serializer. All serialized objects follow the format
         ``(type name, serialized data)``. For example,
@@ -378,7 +378,7 @@ class Serializable:
         through recursion may encode many objects but `kwargs` can only be
         specified once.)
         """
-        # This first line deals with the case when `json_encoder` is called with
+        # This first line deals with the case when `reduce` is called with
         # the parent class (typically `Serializable`), or when the serializer
         # is attached to a base class (e.g. the same serializer for all subclasses of np.dtype) 
         for C in type(value).mro():
@@ -393,7 +393,7 @@ class Serializable:
                            "depending on external librairies (like scipy or torch) "
                            "are only registered when the corresponding module in "
                            "scityping is imported.\n"
-                           f"Attempted to serialize using: {cls}.json_encoder\n"
+                           f"Attempted to serialize using: {cls}.reduce\n"
                            f"Registered types for this class: {cls._registry.keys()}")
 
         # Call Data.encode, passing any parameters from kwargs that match a parameter in Data.encode.
@@ -425,8 +425,6 @@ class Serializable:
                 #     f"{serializer_cls.__qualname__}.Data, a tuple or a dict. If a tuple or "
                 #     f"dict, these must be arguments to {serializer_cls.__qualname__}.Data.")
         return (get_type_key(serializer_cls), data)
-
-    reduce = json_encoder
 
     @classmethod
     def deep_reduce(cls, value, **kwargs) -> Tuple[str, Union[dict,tuple]]:

@@ -21,7 +21,7 @@ def test_purefunction():
 
     # Test reduction/reconstruction with Data object
     # Test that `config.trust_all_inputs` option works as expected
-    data = Serializable.json_encoder(pure_f)
+    data = Serializable.reduce(pure_f)
     with pytest.raises(UnsafeDeserializationError):
         Serializable.validate(data)
     scityping.config.trust_all_inputs = True
@@ -30,7 +30,7 @@ def test_purefunction():
 
     # Nested PureFunctions get collapsed, so naturally they serialize fine
     fpp = PureFunction(PureFunction(pure_f))
-    datapp = Serializable.json_encoder(fpp)
+    datapp = Serializable.reduce(fpp)
     assert datapp == data
     fpp2 = Serializable.validate(datapp)
     assert all(fpp(x) == fpp2(x) for x in [3, 5, 8, 100, 101])
@@ -43,24 +43,24 @@ def test_purefunction():
     # We want to force users to indicate that functions are pure;
     # therefore plain undecorated functions don't serialize.
     with pytest.raises(TypeError):
-        Serializable.json_encoder(f)
+        Serializable.reduce(f)
     with pytest.raises(ValidationError):
         Foo(f=f)
 
 def test_partialpurefunction():
     # If `partial` wraps a non-pure function, it cannot be serialized
     with pytest.raises(TypeError):
-        Serializable.json_encoder(partial(f, n=3))
+        Serializable.reduce(partial(f, n=3))
 
     # If `partial` wraps a *pure* function, it *can* be serialized
     g = partial(pure_f, n=3)
-    data = Serializable.json_encoder(g)
+    data = Serializable.reduce(g)
     g2 = Serializable.validate(data)
     assert all(g(x) == g2(x) for x in [3, 5, 8, 100, 101])
 
     # We can also directly declare a PartialPureFunction
     h = PartialPureFunction(partial(f, n=4))
-    data = Serializable.json_encoder(h)
+    data = Serializable.reduce(h)
     h2 = Serializable.validate(data)
     assert all(h(x) == h2(x) for x in [3, 5, 8, 100, 101])
 
@@ -84,7 +84,7 @@ def test_compositepurefunction():
     assert all(w(x) == f(x)+h(x) for x in [3, 5, 8, 100, 101])
 
     # Test reduction/reconstruction with Data object
-    data = Serializable.json_encoder(w)
+    data = Serializable.reduce(w)
     w2 = Serializable.validate(data)
     assert all(w(x) == w2(x) for x in [3, 5, 8, 100, 101])
 

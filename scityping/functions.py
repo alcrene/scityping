@@ -130,7 +130,7 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
        function.
 
     .. Hint:: `PureFunction` instances can be pickled, using the same serializer
-       as `Serializable.json_encoder`. This can make them more portable:
+       as `Serializable.reduce`. This can make them more portable:
        whereas a pickled python function requires that the original function &
        module still exist at the same location, a pickled `PureFunction`
        deserializes from the source code in the serialized data.
@@ -607,7 +607,7 @@ def serialize_function(f) -> str:
     body are available in the deserializer's scope.
 
     .. Note:: Instances of `PureFunction` are not supported. Instead use
-       `Serializable.json_encoder(pure_function)`, which will take care of
+       `Serializable.reduce(pure_function)`, which will take care of
        extracting the function and calling `serialize_function` on it.
     """
 
@@ -617,7 +617,7 @@ def serialize_function(f) -> str:
     elif hasattr(f, '__func_src__'):
         return f.__func_src__
     elif isinstance(f, PureFunction):
-        raise TypeError("To serialize a `PureFunction`, use `Serializable.json_encoder(purefunc)`.")
+        raise TypeError("To serialize a `PureFunction`, use `Serializable.reduce(purefunc)`.")
         # return f.serialize(f)  # (Partial/Composite)PureFunction takes care of extracting its `func` attribute and calling `serialize_function` on it
     elif isinstance(f, FunctionType):
         s = remove_comments(inspect.getsource(f))

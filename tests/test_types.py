@@ -19,7 +19,7 @@ from scityping.pint import PintUnit, PintValue
 def test_numpy(caplog):
 
     arr = np.arange(3, dtype='uint32')
-    arr2 = Array.validate(Array.json_encoder(arr))
+    arr2 = Array.validate(Array.reduce(arr))
     assert repr(arr) == repr(arr2)  # Check that they match exactly, including dtype
 
     class Model(BaseModel):
@@ -233,27 +233,27 @@ def test_distributions(caplog):
         D.random_state = 123
         # By default the RNG is serialized, so both D and D2 return the same values
         with caplog.at_level(logging.ERROR, logger="scityping.scipy"):  # Hide warnings about serializing arguments
-            D2 = Distribution.validate(UniDistribution.json_encoder(D))
+            D2 = Distribution.validate(UniDistribution.reduce(D))
         assert (D.rvs(25) == D2.rvs(25)).all()
         # The RNG state is generally the largest amount of data (especially for MT19337),
         # so we can skip serializing if we don't need it.
         with caplog.at_level(logging.ERROR, logger="scityping.scipy"):  # Hide warnings about serializing arguments
-            D3 = Distribution.validate(UniDistribution.json_encoder(D, include_rng_state=False))
+            D3 = Distribution.validate(UniDistribution.reduce(D, include_rng_state=False))
         assert (D.rvs(25) != D3.rvs(25)).any()  # Now the generated random numers are different
 
     # For multivariate distributions, in contrast to univariate ones, a different
     # subclass of `Distribution` is needed for each one.
     D = stats.multivariate_normal([2, -2], [[2.2, 1.],[1., 1.3]])
     D.random_state = 321
-    D2 = Distribution.validate(MvNormalDistribution.json_encoder(D))
+    D2 = Distribution.validate(MvNormalDistribution.reduce(D))
     assert (D.rvs(25) == D2.rvs(25)).all()
-    D3 = Distribution.validate(MvNormalDistribution.json_encoder(D, include_rng_state=False))
+    D3 = Distribution.validate(MvNormalDistribution.reduce(D, include_rng_state=False))
     assert (D.rvs(5) != D3.rvs(5)).all()  # With R-valued distributions we can be more aggressive in the test and use .all() instead of .any()
 
     # Not all multivariate distributions are implemented yet
     D = stats.dirichlet([.2, .7])
     with pytest.raises(NotImplementedError):
-        MvDistribution.json_encoder(D)
+        MvDistribution.reduce(D)
 
     # Test complete serialization to JSON
     class Foo(BaseModel):
@@ -286,7 +286,7 @@ def test_pint():
     with pytest.raises(ValueError):
         PintUnit.validate(2.*ureg.m)
     u = ureg.m
-    u_json = PintUnit.json_encoder(u)
+    u_json = PintUnit.reduce(u)
     assert u_json == ('scityping.pint.PintUnit', PintUnit.Data(name='meter'))
     assert PintUnit.validate(u_json) == ureg.m
 
@@ -307,8 +307,8 @@ def test_pint():
     assert PintValue.validate(3.*ureg.dimensionless) == PintValue(3.) == 3.*ureg.dimensionless
     v = 3.*ureg.s
     vms = v.to('ms')
-    v_json = PintValue.json_encoder(v)
-    vms_json = PintValue.json_encoder(vms)
+    v_json = PintValue.reduce(v)
+    vms_json = PintValue.reduce(vms)
     assert v_json == ('scityping.pint.PintQuantity', PintValue.Data(data=(3.0, (('second', 1),))))
     assert v_json != vms_json  # Serialization changes depending on units
     assert PintValue.validate(v_json) == PintValue.validate(vms_json)  # But deserialized values still compare equal
@@ -337,7 +337,7 @@ def test_torch():
     for a in [s_u8, s_i32, s_f64, s_bool,
               v_u8, v_i32, v_f64, v_bool,
               m_u8, m_i32, m_f64, m_bool]:
-        b = TorchTensor.validate(TorchTensor.json_encoder(a))
+        b = TorchTensor.validate(TorchTensor.reduce(a))
         assert a.shape == b.shape
         assert a.dtype == b.dtype
         assert (a == b).all()

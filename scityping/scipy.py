@@ -257,7 +257,7 @@ class MvDistribution(Distribution, MvRVFrozen):
             return False
         def encode(rv, include_rng_state=True):
             raise NotImplementedError(
-                "The json_encoder for `Distribution` needs to be special "
+                "The reduce for `Distribution` needs to be special "
                 "cased for each multivariate distribution, and this has "
                 f"not yet been done for '{rv._dist}'.")
 class MvNormalDistribution(MvDistribution, MvNormalFrozen):

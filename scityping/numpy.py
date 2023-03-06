@@ -575,10 +575,10 @@ class NPGenerator(Serializable, np.random.Generator):
         buffer       : Optional[Array[np.uint64,1]]=None  # Philox
         buffer_pos   : Optional[int]=None        # Philox
             # Pydantic will recursively encode state entries, and use Array's
-            # json_encoder when needed
+            # reduce when needed
         def encode(rng):
             return rng.bit_generator.state
-                # Since this is a dict, NPGenerator.json_encoder will pass by keyword to `Data`
+                # Since this is a dict, NPGenerator.reduce will pass by keyword to `Data`
         def decode(data: 'NPGenerator.Data') -> np.random.Generator:
             bg = getattr(np.random, data.bit_generator)()
             bg.state = asdict(data)

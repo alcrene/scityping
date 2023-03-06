@@ -100,7 +100,7 @@ class ModelMetaclass(PydanticModelMetaclass):
     """
     def __new__(mcs, name, bases, namespace, **kwargs):
         obj = super().__new__(mcs, name, bases, namespace, **kwargs)
-        # Wrap the json_encoder with scityping_encoder
+        # Wrap the reduce with scityping_encoder
         encoder = partial(scityping_encoder, base_encoder=obj.__json_encoder__)
         obj.__json_encoder__ = staticmethod(encoder)
         # Apply patch to allow their subclasses to override root validators.

@@ -310,7 +310,7 @@ class GenericType(Type):
                         "type arguments are specified, or all of them are.\n"
                         f"Type {T} has both.")
                 # For non-concrete types, the standard Type serialization format suffices
-                # (NB: We can't use Typing.json_encoder, because we need '_name' instead of '__name__'
+                # (NB: We can't use Type.reduce, because we need '_name' instead of '__name__'
                 # FIXME: I don't think returning a Data of another type is supported yet
                 return Type.Data(module=T.__module__, name=T._name)
                 # raise NotImplementedError("Only concrete generic types can be serialized. "
