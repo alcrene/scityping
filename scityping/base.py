@@ -381,7 +381,7 @@ class Serializable:
         # This first line deals with the case when `reduce` is called with
         # the parent class (typically `Serializable`), or when the serializer
         # is attached to a base class (e.g. the same serializer for all subclasses of np.dtype) 
-        for C in type(value).mro():
+        for C in type.mro(type(value)):  # In contrast to `type(value).mro()`, this works also when `value` is a type
             serializer_cls = cls._registry.get(C)
             if serializer_cls:
                 break
@@ -389,7 +389,7 @@ class Serializable:
             # I'm not sure what the most appropriate error type should be, but at least TypeError is consistent with the similar error in `validate()`
             # Also `KeyError` is special and doesn't display newlines; I think it is best reserved for cases where the user interacts directly with a mapping
             raise TypeError("There seems to be no JSON encoder registered for any "
-                           f"of the types {type(value).mro()}. Note that types "
+                           f"of the types {type.mro(type(value))}. Note that types "
                            "depending on external librairies (like scipy or torch) "
                            "are only registered when the corresponding module in "
                            "scityping is imported.\n"
@@ -493,8 +493,9 @@ class Serialized(tuple, metaclass=SerializedMeta):
     """
     Constructor for a type describing serialized objects.
     If ``MyType`` is a subclass of `Serializable`, then ``Serialized[MyType]``
-    returns a type which is essentially ``Tuple[str, T.Data]`` but which also
-    correctly validates serialized data from subclasses of ``MyType``. 
+    returns a type which is essentially ``Tuple[str, T.Data]`` but which also:
+    - accepts serialized data from subclasses of ``MyType``;
+    - accepts instances of ``MyType`` (in which case they are serialized).
     """
     __slots__ = ()
     _serialized_type: ClassVar
@@ -504,6 +505,9 @@ class Serialized(tuple, metaclass=SerializedMeta):
         yield cls.validate
     @classmethod
     def validate(cls, value):
+        # If we got `MyType` instead of `Serialized[MyType]`, convert it to the right form.
+        if isinstance(value, cls._serialized_type):
+            value = cls.reduce(value)
         # Raise error if value is not of correct type
         if ( not isinstance(value, Sequence_) or len(value) != 2 or not isinstance(value[0], str) ):
             value_str = str(value)
