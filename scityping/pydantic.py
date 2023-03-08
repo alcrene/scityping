@@ -7,16 +7,20 @@ Provides:
   `pydantic.dataclasses.dataclass`, which by default uses the scityping JSON
   encoder provided by this package.
 """
-from typing import Any, Type
+from typing import TYPE_CHECKING, Any, Type
 from functools import partial
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic.generics import GenericModel as PydanticGenericModel
 from pydantic.main import (ModelMetaclass as PydanticModelMetaclass,
                            ValidationError as PydanticValidationError)
+from pydantic.generics import GenericModel as PydanticGenericModel
 from pydantic.json import pydantic_encoder
+from pydantic.error_wrappers import display_errors
 from pydantic.dataclasses import (dataclass as pydantic_dataclass,
                                   _validate_dataclass as _pydantic_validate_dataclass)
 from .base import ABCSerializable, Serializable, json_like
+
+if TYPE_CHECKING:
+    from pydantinc.typing import ReprArgs
 
 class ValidationError(PydanticValidationError):
     """
