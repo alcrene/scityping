@@ -16,3 +16,6 @@ __pycache__/
 
 # sphinx
 _build
+
+# setuptools_scm
+_version.py
