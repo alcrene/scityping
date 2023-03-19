@@ -3,64 +3,43 @@
 A set of Pydantic-compatible types relevant for scientific applications.
 Includes types for numbers, NumPy, and PyTorch subtypes and objects.
 
-Manifest
-========
-
-Types:
-------
-  + Base class
-    - Serializable
-  + Types (implemented in smttask.typing)
-    - Types
-    - Generics
-  + Builtins:
-    - Range
-    - Sequence  (In contrast to Pydantic's Sequence, also recognizes `Range`)
-    - Slice
-  + Numbers:
-    - Number (validation only)
-    - Integral (validation only)
-    - Real (validation only, except int -> float)
-
-JSON encoders
--------------
-  + Builtins:
-    - complex
-    - range
-    - slice
-    - type
-
-TODO: JSON schemas are not correct.
 """
 # TODO: __modify_schema__ should be defined in Serializable, by using the schema of the Data
 
 from __future__ import annotations
 
 import abc
+import typing
+import inspect
 from types import SimpleNamespace
 from collections.abc import Callable as Callable_
-import typing
-from typing import Optional, Union, Any, Iterable, Tuple, Dict
+from typing import Optional, Union, Any, Iterable, List, Tuple, Dict, Literal
+from dataclasses import dataclass, asdict, fields
 
 import numbers
 
 import logging
 logger = logging.getLogger(__name__)
 
-from .base import Serializable, json_like  # Serializable is not defined in this module to prevent import cycles
+from .base import Serializable, json_like, Dataclass, validate_dataclass
+from .utils import get_type_key
+from .config import config
 
 # dataclasses are used for the `Data` container associated to each type.
-# Use Pydantic dataclasses if available (they provide serialization/deserialization)
-# Otherwise, use builtin dataclasses
-# TODO: Don’t use pydantic dataclasses. Use normal ones, and include deserialization in `SerializedData`
-try:
-    import pydantic
-except ModuleNotFoundError:
-    from dataclasses import dataclass
-else:
-    from .pydantic import dataclass
+# # Use Pydantic dataclasses if available (they provide serialization/deserialization)
+# # Use the smart_union=True option with Pydantic dataclasses, to avoid accidental coercion
+# # Otherwise, use builtin dataclasses
+# # TODO: Don’t use pydantic dataclasses. Use normal ones, and include deserialization in `SerializedData`
+# try:
+#     import pydantic
+# except ModuleNotFoundError:
+#     from dataclasses import dataclass
+# else:
+#     from .pydantic import dataclass as pydantic_dataclass
+#     dataclass = pydantic_dataclass(config={"smart_union": True})
 
-__all__ = ["SerializedData", "NoneType", "Complex", "Range", "Slice",
+__all__ = ["dataclass", "SerializedData",
+           "NoneType", "Complex", "Range", "Slice",
            "Number", "Integral", "Real",
            "Type", "GenericType", "PydanticGenericType"]
 
@@ -71,13 +50,18 @@ __all__ = ["SerializedData", "NoneType", "Complex", "Range", "Slice",
 class SerializedDataMeta(abc.ABCMeta):
     def __new__(metacls, cls, bases, namespace):
         for nm, attr in namespace.items():
-            if (not nm.startswith("__") and isinstance(attr, Callable_)):
+            if not nm.startswith("__") and isinstance(attr, Callable_):
                 # NB: staticmethod and classmethod objects are not callable
                 # Dunder methods should remain methods
-                namespace[nm] = staticmethod(attr)
+                sig = inspect.signature(attr)
+                if sig.parameters and next(iter(sig.parameters)) == "self":
+                    # If the first argument is `self`, don’t convert to a static method
+                    pass
+                else:
+                    namespace[nm] = staticmethod(attr)
         obj = super().__new__(metacls, cls, bases, namespace)
         return dataclass(obj)
-class SerializedData(metaclass=SerializedDataMeta):
+class SerializedData(Dataclass, metaclass=SerializedDataMeta):
     """
     Define a helper base class for nested Data data classes, which
     - makes every method static (avoiding the need to pass an unnecessary 'self');
@@ -85,15 +69,17 @@ class SerializedData(metaclass=SerializedDataMeta):
     """
     @abc.abstractmethod
     def encode(value): raise NotImplementedError
-    ## Pydantic compatibility ##
-    # Note that instead of defining these methods, `SerializedData` could inherit
-    # from `BaseModel`, but that would make pydantic a hard dependency
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-    @classmethod
-    def validate(cls, value, field=None):  # 'field' only present for consistency
-        return cls(**value)
+    def __post_init__(self):
+        validate_dataclass(self, inplace=True)
+    # ## Pydantic compatibility ##
+    # # Note that instead of defining these methods, `SerializedData` could inherit
+    # # from `BaseModel`, but that would make pydantic a hard dependency
+    # @classmethod
+    # def __get_validators__(cls):
+    #     yield cls.validate
+    # @classmethod
+    # def validate(cls, value, field=None):  # 'field' only present for consistency
+    #     return cls(**value)
 
 # ###############
 # Special type which only accepts the value `None`; used for deactivating
@@ -108,7 +94,9 @@ class NoneType:
     def __get_validators__(cls):
         yield cls.validate
     @classmethod
-    def validate(cls, v, field):
+    def validate(cls, v, field=None):
+        if field is None:
+            field = SimpleNamespace(name="")
         assert v is None, f"Field '{field.name}' of '{cls.__qualname__}' accepts only the value `None`."
         return None
 
@@ -253,7 +241,7 @@ class Real(numbers.Real):
 
 
 #####################
-# Type (WIP)
+# Type
 #####################
 
 T = typing.TypeVar('T')
@@ -264,19 +252,16 @@ class Type(typing.Type[T], Serializable):  # NB: Serializable must come 2nd
     During deserialization, it effectively executes
         from <module name> import <type name>
 
-    .. Caution:: **Bug** As with `typing.Type`, one can indicate the specific type between
+    .. Caution:: **Limitation** As with `typing.Type`, one can indicate the specific type between
        brackets; e.g. ``Type[int]``, and Pydantic will enforce this restriction.
        However at present deserialization only works when the type is unspecified.
-
-    .. Caution:: This class was recently ported from smttask. It has has yet
-       to see much testing.
 
     .. Warning:: This kind of serialization will never be 100% robust and
        should be used with care. In particular, since it relies on <module name>
        remaining unchanged, it is certainly not secure. (Although no less so
        than `pickle`.)
        Because of the potential security issue, it requires adding modules where
-       tasks are defined to the ``smttask.config.safe_packages`` whitelist.
+       tasks are defined to the ``scityping.config.safe_packages`` whitelist.
     """
     # FIXME: When the type T is specified, the specialized type doesn't inherit __get_validators__
     #   (although it does inherit the other methods)
@@ -289,8 +274,11 @@ class Type(typing.Type[T], Serializable):  # NB: Serializable must come 2nd
             if not isinstance(T, type):
                 raise TypeError(f"'{T}' is not a type.")
             if T.__module__ == "__main__":
-                raise ValueError("Can't serialize types defined in the '__main__' module.")
-            return cls(T.__module__, T.__name__)
+                # raise ValueError("Can't serialize types defined in the '__main__' module.")
+                logger.warning(f"Type '{T}' was serialized in the '__main__' module; "
+                               "it will only be deserializable within the same script "
+                               "or notebook.")
+            return cls(T.__module__, T.__qualname__)
 
         def decode(data: Type.Data) -> Type:
             from importlib import import_module
@@ -298,14 +286,28 @@ class Type(typing.Type[T], Serializable):  # NB: Serializable must come 2nd
             if (any(module.startswith(sm) for sm in config.safe_packages)
                   or config.trust_all_inputs):
                 m = import_module(module)
-                T = getattr(m, data.name)
+                for _name in data.name.split("."):
+                    try:
+                        m = getattr(m, _name)
+                    except AttributeError as e:
+                        if module == "__main__":
+                            raise RuntimeError(
+                                f"The type '{data.name}' was serialized in the same "
+                                "namespace in which it was defined; therefore it can "
+                                "also only be deserialized in that namespace. "
+                                "However no type of that name was found in the current "
+                                "`__main__` namespace")
+                        else:
+                            raise e
+                else:  # All dotted name elements were found
+                    T = m
             else:
                 raise RuntimeError(
                     "As with pickle, deserialization of types can lead to "
                     "arbitrary code execution. It is only permitted after "
-                    f"adding '{module.__name__}' to ``smttask.config.safe_packages`` "
+                    f"adding '{module}' to ``scitying.config.safe_packages`` "
                     "(recommended) or setting the option "
-                    "``smttask.config.trust_all_inputs = True``.")
+                    "``scityping.config.trust_all_inputs = True``.")
             return T
             
     @classmethod

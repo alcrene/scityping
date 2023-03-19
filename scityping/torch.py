@@ -48,7 +48,7 @@ for C in cls.mro():
 
 class TorchModule(nn.Module):
     """
-    Validation only type; for serializing a PyTorch model, see `smttask.ml.TorchModel`.
+    Validation only type; for serializing a PyTorch model, see `scityping.ml.TorchModel`.
     """
     @classmethod
     def __get_validators__(cls):
@@ -84,7 +84,7 @@ def torch_module_state_encoder(
     Encode to PyTorch model state into an ASCII string, which can
     be included in a JSON file.
 
-    .. Remark:: This only encodes the model _state_ (i.e. the value
+    .. Note:: This only encodes the model _state_ (i.e. the value
        from `v.state_dict()`). To reconstruct the model, one also
        needs to store the code, or some other means to reconstruct
        the architecture.
@@ -93,22 +93,24 @@ def torch_module_state_encoder(
     ----------
     v: PyTorch model
     compression: 'blosc' | 'none'
-        Which routine to use to compress bytes, if any.
+       Which routine to use to compress bytes, if any.
     encoding: 'b85'
-        Which ASCII encoding to use. Currently only 'b85' is supported.
-        The `base64` module is used for this encoding.
+       Which ASCII encoding to use. Currently only 'b85' is supported.
+       The `base64` module is used for this encoding.
 
     Returns
     -------
     ``("TorchModuleState", <data>)``
     where `<data>` is a dictionary with four fields:
-        - encoding: Value of `encoding`
-        - compression: Value of `compression`
-        - description: Free-form, human-readable summary of the model
-            (obtained by ``str(v)``)
-        - state: The encoded model state.
+       - encoding: Value of `encoding`
+       - compression: Value of `compression`
+       - description: Free-form, human-readable summary of the model
+           (obtained by ``str(v)``)
+       - state: The encoded model state.
 
-    .. Note:: The current implementation stores all the data as one big
+    .. admonition:: Dev note
+
+       The current implementation stores all the data as one big
        binary blob. We could also store a dictionary of serialized arrays,
        if that makes more sense.
     """

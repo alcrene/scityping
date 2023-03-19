@@ -1,1 +1,3 @@
-- Document PureFunction & friends
+- [ ] Remove `ValidatingConfig`
+    - `config` should use a stdlib dataclass, which are now serializable
+- [ ] Remove hard dependency on Pydantic

@@ -50,17 +50,21 @@ def test_purefunction():
         Foo(f=f)
 
 def test_partialpurefunction():
+    scityping.config.trust_all_inputs = True
+    
     # If `partial` wraps a non-pure function, it cannot be serialized
     with pytest.raises(TypeError):
         Serializable.reduce(partial(f, n=3))
 
     # If `partial` wraps a *pure* function, it *can* be serialized
+    # (Serializes as `PartialPure(f, kwds)`
     g = partial(pure_f, n=3)
     data = Serializable.reduce(g)
     g2 = Serializable.validate(data)
     assert all(g(x) == g2(x) for x in [3, 5, 8, 100, 101])
 
     # We can also directly declare a PartialPureFunction
+    # (Serializes as `PartialPure(Pure, kwds)`. Note that this is different but equivalent to the case above.)
     h = PartialPureFunction(partial(f, n=4))
     data = Serializable.reduce(h)
     h2 = Serializable.validate(data)
@@ -76,6 +80,8 @@ def test_partialpurefunction():
     assert all(foo.f(x) == foo2.f(x) for x in [3, 5, 8, 100, 101])
 
 def test_compositepurefunction():
+    scityping.config.trust_all_inputs = True
+    
     g = partial(pure_f, n=3)
     h = PartialPureFunction(partial(f, n=4))
     # Test arithmetic

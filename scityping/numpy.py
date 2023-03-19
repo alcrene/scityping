@@ -1,23 +1,7 @@
 """
-Manifest
-========
-
-Types:
-------
-  - DType
-  - NPValue   (any numpy scalar != 'object')
-  - Array
-  - NPGenerator  (new style numpy RNG)
-  - RandomState  (old style numpy RNG)
-
-JSON encoders
--------------
-  - dtype
-  - generic   (any numpy scalar != 'object')
-  - ndarray
-  - random.Generator
-  - random.RandomState
+Type annotations and serializers for NumPy types
 """
+
 from __future__ import annotations
 
 import abc
@@ -28,7 +12,7 @@ from typing import (Optional, Union, Any, Literal,
 from dataclasses import asdict
 from functools import lru_cache
 
-from .base import json_like, Serializable, ABCSerializable
+from .base import json_like, Serializable, ABCSerializable, validate_dataclass
 from .base_types import SerializedData
 from .utils import LazyDict, get_type_key
 
@@ -270,10 +254,10 @@ class NPValue(_NPValueType, metaclass=_NPValueMeta):
     - `NPValue[T]` specifies an object to be casted with dtype `T`. Any
        expression for which `np.dtype(T)` is valid is accepted.
 
-    .. Note:: Difference with `DType`. The annotation `NPValue[np.int8]`
-    matches any value of the same type as would be returned by `np.int8`.
-    `DType` describes an instance of `dtype` and would match `np.dtype('int8')`,
-    but also `np.dtype(float)`, etc.
+    .. Note:: **Difference with `DType`.** The annotation `NPValue[np.int8]`
+       matches any value of the same type as would be returned by `np.int8`.
+       `DType` describes an instance of `dtype` and would match `np.dtype('int8')`,
+       but also `np.dtype(float)`, etc.
 
     Example
     -------
@@ -342,9 +326,11 @@ class ListArrayData(SerializedData):
 
 # Longer arrays are compressed and converted to base85 encoding, with a short summary
 # Arrays of size 100 are around the break-even point for 64-bit floats, blosc, base85
-class CompressedArrayData(SerializedData):
-    encoding: Literal[tuple(encoders)]
-    compression: Literal[tuple(compressors)]
+_EncoderType = Literal[tuple(encoders)]         # Workaround because the ability
+_CompressionType = Literal[tuple(compressors)]  #   of scityping.Dataclass to resolve
+class CompressedArrayData(SerializedData):      #   deferred types is limited
+    encoding: _EncoderType
+    compression: _CompressionType
     summary: str
     data: bytes
     @classmethod
@@ -397,7 +383,7 @@ class _ArrayType(Serializable, np.ndarray):
     class Data(SerializedData):
         data: Union[ListArrayData, CompressedArrayData]
         # Class variables; Not yet exposed parameters
-        compression = ("blosc", "zlib")
+        compression = ("blosc", "zlib")  # Fall back on zlib compression if blosc is not available
         encoding = "b85"
         threshold = 100
         @classmethod
@@ -440,9 +426,16 @@ class _ArrayType(Serializable, np.ndarray):
             serialized_cls = cls._registry[value[0]]
             data = value[1]
             if not isinstance(data, serialized_cls.Data):
+                # breakpoint()
+                # data = serialized_cls.Data.validate(data)
                 data = serialized_cls.Data(**data)
+                validate_dataclass(data, inplace=True)
             value = serialized_cls.Data.decode(data)
             return cls.validate(value)  # Still validate with `cls`: typically `seralized_cls` is *less* specific, like unspecified `Array°
+
+        elif isinstance(value, cls.Data):
+            value = cls.Data.decode(value)
+            return cls.validate(value)
 
         elif isinstance(value, np.ndarray):
             # Don't create a new array unless necessary

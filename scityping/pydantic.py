@@ -1,6 +1,7 @@
 """
 Tie-ins for pydantic which explicitely depend on pydantic types.
 Provides:
+
 - An scityping-aware "default" callable for `json.dump`, which allows it to
   serialize `Serializable` types.
 - Drop-in replacements for `pydantic.BaseModel` and
@@ -9,15 +10,16 @@ Provides:
 """
 from typing import TYPE_CHECKING, Any, Type
 from functools import partial
-from pydantic import BaseModel as PydanticBaseModel
+from dataclasses import is_dataclass
+from pydantic import BaseModel as PydanticBaseModel, __version__ as pydantic_version
 from pydantic.main import (ModelMetaclass as PydanticModelMetaclass,
                            ValidationError as PydanticValidationError)
 from pydantic.generics import GenericModel as PydanticGenericModel
-from pydantic.json import pydantic_encoder
 from pydantic.error_wrappers import display_errors
 from pydantic.dataclasses import (dataclass as pydantic_dataclass,
                                   _validate_dataclass as _pydantic_validate_dataclass)
-from .base import ABCSerializable, Serializable, json_like
+from .base import Serializable, json_like, Dataclass
+from .json import scityping_encoder
 
 if TYPE_CHECKING:
     from pydantinc.typing import ReprArgs
@@ -43,38 +45,6 @@ class ValidationError(PydanticValidationError):
         return [('model', self.model.__qualname__), ('errors', self.errors())]
 
 
-# Based off pydantic.json.custom_pydantic_encoder
-def scityping_encoder(obj: Any, base_encoder=pydantic_encoder) -> Any:
-    if isinstance(obj, ABCSerializable):
-        try:
-            # NB: The function pydantic.json.pydantic_encoder checks if the argument
-            #     is a BaseModel or dataclass, and if so, calls respectively .dict()
-            #     or asdict() to convert it to a dictionary.
-            #     *These are recursive calls*, which means that they reduce
-            #     every value inside them using only that function’s machinery:
-            #     nested calls to `pydantic_encoder` are *not* made, and in
-            #     particular `asdict` will ignore any custom encoders – it even
-            #     calls `deep_copy` on its contents.
-            # We emulate pydantic..pydantic_encoder here and call a recursive
-            # function to also reduce any nested Serializable values within `obj`.
-            # If we only reduce the `obj` but not its attributes,
-            # pydantic..pydantic_encoder may bypass `Serializable.reduce` for
-            # Serializable attributes.
-            return Serializable.deep_reduce(obj)
-        except PydanticValidationError as e:
-            # Pydantic's ValidationError uses obj.__name__ it its error message.
-            # With our SciTyping pattern, this results in all error message
-            # displaying `Data` as the object, which isn't very useful.
-            # To improve the error message, we modify the model attached to
-            # the exception so that its __name__ is actually __qualname__.
-            # This monkey patching isin't especially clean, but it should be
-            # innocuous: after all, we've already aborted code execution.
-            if e.model.__name__ == "Data":
-                e.model.__name__ = e.model.__qualname__
-            raise
-    else:
-        return base_encoder(obj)
-
 def remove_overridden_validators(model: PydanticBaseModel) -> PydanticBaseModel:
     """
     Currently a Pydantic bug prevents subclasses from overriding root validators.
@@ -98,17 +68,35 @@ def remove_overridden_validators(model: PydanticBaseModel) -> PydanticBaseModel:
 class ModelMetaclass(PydanticModelMetaclass):
     """
     Use this as the metaclass for BaseModel types, to allow them
-    a) to find serializers defined in Serializable
-    b) to allow their subclasses to override root validators
+
+    1. to find serializers defined in Serializable;
+    2. to allow their subclasses to override root validators,
        (patch for https://github.com/samuelcolvin/pydantic/issues/1895)
+       (Only applied if Pydantic version is ⩽ 1.8)
     """
     def __new__(mcs, name, bases, namespace, **kwargs):
+        ann = namespace.get("__annotations__", {})
+        for field, T in ann.items():
+            if is_dataclass(T) and not isinstance(T, Serializable):  # Serializable subclasses already have an __get_validators which yields cls.validate
+                orig_get_validators = getattr(T, "__get_validators__", None)
+                if not orig_get_validators:
+                    try:
+                        T.__get_validators__ = _get_dataclass_validator
+                    except AttributeError:
+                        logger.error(
+                            "Cannot add attribute '__get_validators__' to the "
+                            f"type `{T.__qualname__}`: the class `{name}` will "
+                            "not be deserializable. This can happen if the class "
+                            "was defined with '__slots__'.")
         obj = super().__new__(mcs, name, bases, namespace, **kwargs)
         # Wrap the reduce with scityping_encoder
         encoder = partial(scityping_encoder, base_encoder=obj.__json_encoder__)
         obj.__json_encoder__ = staticmethod(encoder)
-        # Apply patch to allow their subclasses to override root validators.
-        return remove_overridden_validators(obj)
+        # If Pydantic version is ⩽ 1.8, apply patch to allow their subclasses to override root validators.
+        _pydantic_version = tuple(int(i) for i in pydantic_version.split("."))
+        if _pydantic_version <= (1, 8):
+            obj = remove_overridden_validators(obj)
+        return obj
 
 class BaseModel(PydanticBaseModel, metaclass=ModelMetaclass):
     pass
@@ -116,10 +104,26 @@ class BaseModel(PydanticBaseModel, metaclass=ModelMetaclass):
 class GenericModel(PydanticGenericModel, BaseModel):
     pass
 
+def _get_dataclass_validator():
+    yield _dataclass_prevalidator
+
+def _dataclass_prevalidator(value):
+    if json_like(value, Dataclass._registry):
+        return Dataclass.validate(value)
+    else:
+        return value
+
 # C.f. pydantic.dataclasses
 def _validate_serializable_dataclass(cls: Type["DataclassT"], v: Any) -> "DataclassT":
     if json_like(v, cls._registry):
         return cls.validate(v)
+    else:
+        return _pydantic_validate_dataclass(cls, v)
+
+# Hard-coded special-case support for stdlib dataclasses
+def _validate_plain_dataclass(cls: Type["DataclassT"], v: Any) -> "DataclassT":
+    if json_like(v, Dataclass._registry):
+        return Dataclass.validate(v)
     else:
         return _pydantic_validate_dataclass(cls, v)
 
@@ -138,14 +142,16 @@ def dataclass(_cls=None, **kwargs):
     # logic so they recognize Serializable types
     dclass = pydantic_dataclass(_cls, **kwargs)
 
-    # Validation: Patch __pydantic_validate_values__ to recogize a Serialized `self`
+    # Validation: Patch __validate__ to recogize a Serialized `self`
     #    Note that any Serializable *arguments* to the dataclass will already
     #    be correctly deserialized. What we need to catch is the case where
-    #    `self` is both a dataclass and Serializable, and we are instantiating
-    #    it from serialized data.
+    #    `self` is a dataclass, and we are instantiating it from serialized data.
     #    Therefore we only need to wrap __validate__, not __pydantic_validate_values__
     if issubclass(dclass, Serializable):
         setattr(dclass, "__validate__", classmethod(_validate_serializable_dataclass))
+    else:
+        # Hard-coded special-case support for stdlib dataclasses
+        setattr(dclass, "__validate__", classmethod(_validate_plain_dataclass))
     
     # JSON encoder: As in `ModelMetaclass`, we patch the __json_encoder__ attribute
     obj = dclass.__pydantic_model__

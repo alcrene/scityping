@@ -217,3 +217,4 @@ class TypeRegistry(dict):
             return self.__getitem__(key)
         except KeyError:
             return default
+

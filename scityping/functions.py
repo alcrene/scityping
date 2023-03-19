@@ -123,6 +123,12 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
 
     .. Note:: Functions are deserialized without the scope in which they
        were created.
+       
+       To provide additional scope, one or more modules name can be added to the
+       list `PureFunction.modules`. These modules are imported deserialization
+       but are not serialized with the function.
+       Adding modules this way is considered an experimental feature.
+
 
     .. Hint:: If ``f`` is meant to be a `PureFunction`, but defined as::
 
@@ -142,18 +148,14 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
        within brackets: ``PureFunction[[arg types], return y]``. However the
        returned type doesn't support type-checking.
 
-    .. WIP:: One or more modules can be specified to provide definitions for
-       deserializing the file, but these modules are not serialized with the
-       function.
-
     .. Hint:: `PureFunction` instances can be pickled, using the same serializer
        as `Serializable.reduce`. This can make them more portable:
        whereas a pickled python function requires that the original function &
        module still exist at the same location, a pickled `PureFunction`
        deserializes from the source code in the serialized data.
     """
-    modules = []  # Use this to list modules that should be imported into
-                  # the global namespace before deserializing the function
+    modules: List[str] = []  # Use this to list modules that should be imported into
+                             # the global namespace before deserializing the function
     # subtypes= {}  # Dictionary of {JSON label: deserializer} pairs.
     #               # Use this to define additional PureFunction subtypes
     #               # for deserialization.
@@ -345,7 +347,7 @@ class PartialPureFunction(PureFunction):
     The original function may be impure.
     """
     class Data(SerializedData):
-        func: Union[str,PureFunction]
+        func: Union[PureFunction,str]
         args: tuple
         kwargs: dict
 
@@ -737,16 +739,21 @@ def deserialize_function(
         elif "lambda " in s or s.count("->") == 1:
             f = _deserialize_lambda(s, globals, locals)
         else:
+            breakpoint()
             raise ValueError(msg)
         # Store the source with the function, so it can be serialized again
         f.__func_src__ = s_orig
         return f
     else:
+        breakpoint()
         raise ValueError(msg)
 
 def _deserialize_def(s, globals, locals):
     decorator_lines, s = split_decorators(s)
     if not s[:4] == "def ":
+        msg = ("Cannot decode serialized function. It should be a string as "
+               f"returned by inspect.getsource().\nReceived value:\n{s}")
+        breakpoint()
         raise ValueError(msg)
     fname = s[4:s.index('(')].strip() # Remove 'def', anything after the first '(', and then any extra whitespace
     s = "\n".join(chain(decorator_lines, [s]))

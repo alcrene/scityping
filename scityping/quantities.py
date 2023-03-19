@@ -5,7 +5,8 @@ Pydantic-aware classes for Quantities objects.
 import numpy as np
 import quantities as pq
 
-from .base_types import Serializable, SerializedData, ABCSerializable
+from .base import Serializable, ABCSerializable
+from .base_types import SerializedData
 from .numpy import Array
 
 class QuantitiesQuantity(Serializable, pq.Quantity):
@@ -14,7 +15,7 @@ class QuantitiesQuantity(Serializable, pq.Quantity):
         units: str
         def encode(val): return v.magnitude, str(v.dimensionality)
 
-Quantity = QuantityQuantities  # Match the name in quantities
+Quantity = QuantitiesQuantity  # Match the name in quantities
 
 type_to_register = pq.Quantity
 cls = QuantitiesQuantity
@@ -26,11 +27,13 @@ for C in cls.mro():
         C._registry[type_to_register] = cls
 
 
-class QuantitiesUnit(QuantitiesValue):
+class QuantitiesUnit(QuantitiesQuantity):
     """
     Exactly the same as QuantitiesValue, except that we enforce the magnitude
     to be 1. In contrast to Pint, Quantities doesn't seem to have a unit type.
     """
+    class Data(QuantitiesQuantity.Data):
+        pass
     @classmethod
     def validate(cls, v, field=None):
         v = super().__init__(v, field=field)
