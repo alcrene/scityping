@@ -1,15 +1,18 @@
 # Scityping: type hints and serializers for scientific types
 
-A collection of type hint specifiers for Python types common in the fields of scientific computing, data science and machine learning. Most types come with a pair of JSON serializer/deserializer functions, which can be used both to archive and transfer data.
-In contrast to pickling, the resulting files are both future safe and human readable, which makes them especially suitable to ensure [reproducibility](https://the-turing-way.netlify.app/reproducible-research/reproducible-research.html).
+A collection of type annotations specifiers for Python types common in the fields of scientific computing, data science and machine learning. Most types come with a pair of JSON serializer/deserializer functions, which can be used both to archive and transfer data.
+In contrast to pickling, the resulting JSON data is both future safe and human readable, which makes especially useful for [reproducible research](https://the-turing-way.netlify.app/reproducible-research/reproducible-research.html).
 
-Some supported data types (see [below](#defined-types) for a full list):
+Some supported data types (see [the documentation](https://scityping.readthedocs.io/page/types_reference.html) for a full list):
 - `range`
 - NumPy arrays[^1]
 - NumPy random number generators
-- SciPy distributions
+- SciPy statistical distributions
+- Pure functions
 - PyTorch tensors
-- Values with units (Pint)
+- Values with units ([Pint](https://pint.readthedocs.io))
+
+More importantly, *scityping* is built upon a [simple yet flexible mechanism](#an-extensible-serialization-hierarchy) for defining custom JSON serializers and associating them to preexisting types. This means that any Python type which is be serializable, is also serializable in practice. So you can take an existing analysis pipeline, and make the input or output of any intermediate step exportable to JSON – without ever touching the pipeline itself !
 
 [^1]: Large arrays are compressed, but saved alongside a human-readable snippet to allow inspection.
 
@@ -19,7 +22,7 @@ Types were designed and tested with Pydantic in mind, so they can be used as typ
 ```python
 from scityping.pydantic import BaseModel
 ```
-(Don’t worry: this is not a rewrite of `BaseModel`. It provides the same class you get when importing from pydantic, but adds a hook for our extensible type machinery.)
+(Don’t worry: this is not a rewrite of `BaseModel`. It is just a small wrapper class which adds a hook for our extensible type machinery.)
 
 Example usage:
 
@@ -46,17 +49,24 @@ print(model2.data)
 Serializers are class methods, so they can also be used by accessing them directly.
 
 ```python
+import json
 import numpy as np
-from scityping import Array
+from scityping import Serializable
+from scityping.json import scityping_encoder
 
-data = np.array([1, 1, 2, 3, 5])
-json_data = Array.json_encoder(data)
-print(json_data)
-# {'data': ListArrayData(data=[1, 1, 2, 3, 5], dtype=dtype('int64'))}
-data2 = Array.validate(json_data)
-print(data2)
+x = np.array([1, 1, 2, 3, 5])
+reduced_x = Serializable.reduce(x)
+print(reduced_x)
+# ('scityping.numpy._ArrayType', _ArrayType.Data(data=ListArrayData(data=[1, 1, 2, 3, 5], dtype=dtype('int64'))))
+json_x = json.dumps(x, default=scityping_encoder)
+# "['scityping.numpy._ArrayType', {'data': {'data': [1, 1, 2, 3, 5], 'dtype': ['scityping.numpy.DType', {'desc': 'int64'}]}}]"
+x2 = Serializable.validate(reduced_x)
+x2 = Serializable.validate(json.loads(json_x))  # Equivalent
+print(x2)
 # array([1, 1, 2, 3, 5], dtype=int)
 ```
+
+Note here that we use the `.reduce()`, `.deep_reduce()` and `.validate()` methods attached to the base class: it is not necessary to know before hand the type of `x`.
 
 ## Origin and motivation
 
@@ -108,12 +118,12 @@ class Signal(Serializable):
 
   @dataclass
   class Data:                    # The `Data` class stores the minimal
-    values: Array[2, float]      # set of information required to
-    times : Array[1, int]        # recreate the `Signal` class.
+    values: Array[float, 2]      # set of information required to
+    times : Array[int, 1]        # recreate the `Signal` class.
     freq  : float
 
     @staticmethod
-    def encode(signal: Signal):  # The `encode` method is required
+    def encode(signal: "Signal"):  # The `encode` method is required
       return (signal.values, signal.times, signal.freq)
 
   def __init__(values, times, freq):
@@ -156,9 +166,9 @@ class Range(Serializable, range):
     stop: Optional[int]=None
     step: Optional[int]=None
     def encode(self, r): return r.start, r.stop, r.step
-    def decode(self, data: 'Range.Data'): return range(*data)
+    def decode(data): return range(data.start, data.stop, data.step)
 ```
-Note that while the `decode` mechanism can help solve corner cases, in most situations the benefits are cosmetic.
+Note that while the `decode` mechanism can help solve corner cases, in many situations the benefits are cosmetic.
 
 Finally, extending an *existing* type with a serializer is just a matter of defining a subclass. For example, the provided `Complex` type is implemented as follows:
 ```python
@@ -167,8 +177,8 @@ class Complex(Serializable, complex):
   class Data:
     real: float
     imag: float
-    def encode(z):
-      return z.real, z.imag
+    def encode(z): return z.real, z.imag
+    def decode(data): return complex(data.real, data.imag)
 ```
 (When the subclass uses the *same name* (case-insensitive), a bit of magic is applied to associate it to the base type. Otherwise an extra `Complex.register(complex)` is needed.)
 It can then be used to allow serializing all complex numbers (not just instance of `Complex`):
@@ -182,7 +192,7 @@ Foo(z=3+4j).json()
 ```
 Note that this works even if `Complex` is defined after `Foo`, without any patching of `Foo`’s list of `__json_encoders__`.[^post-type-def]
 
-**Important** The nested `Data` class must provide type-aware deserialization logic. The easiest way to do this is to make use either `scityping.pydantic.BaseModel` or `scityping.pydantic.dataclass`. Note that the builtin `dataclasses.dataclass` does *not* perform any parsing of its arguments by default, so simply wrapping the `Data` class with `dataclasses.dataclass` is not sufficient.
+**Hint** It is recommended that the nested `Data` provide type-aware deserialization logic. The easiest way to do this is to use either `scityping.pydantic.BaseModel` or `scityping.pydantic.dataclass`. We do add basic deserialization support for the builtin `dataclasses.dataclass`, but this is intentionally limited to a few basic types (`int`, `float`, `str`) and `Serializable` subclasses. If your data are very simple, this may be sufficient – see the docstring `scityping.Dataclass` for what exactly is supported.
 
 [^post-type-def]: The corollary of this is that it makes it easier for modules to arbitrarily modify how types are serialized by *already imported* modules. Thus by adding a new serializer, a new package may break a previously working one. Also, while the hooks for extending type suport don't increase the attack surface vis-à-vis a malicious actor (imported Python modules are already allowed to inject code wherever they please), they might make things easier for them.
 
@@ -200,34 +210,3 @@ In general, within scientific applications these performance considerations shou
 
 [^negligeable-comp-cost]: Unless *a lot* of builtin types are extended with serializers.
 
-## Defined types
-
-### Base types
-
-- `Serializable`  (mixin class used to define new serializable types)
-- `Complex`
-- `Range`
-- `Slice`
-- `Number` (validation only)
-- `Integral`  (validation only)
-- `Real`  (validation only)
-
-### NumPy types
-
-- `DType`
-- `NPValue`
-- `Array`
-- `NPGenerator`
-- `RandomState`
-
-### SciPy types
-
-- `Distribution`
-  + `UniDistribution`
-  + `MvNormalDistribution`
-
-### PyTorch types
-
-- `TorchTensor`
-- `TorchModule` (partially; validation + separate serialization functions)
-- `TorchGenerator`
