@@ -1002,6 +1002,9 @@ class Dataclass(Serializable):
         elif isinstance(value, Dataclass.Data):
             value = validate_dataclass(value, inplace=True)
             return value.type(**value.data)
+        elif cls is Dataclass and is_dataclass(value):
+            # The generic `Dataclass` serves as an ABC for all dataclasses
+            return value
         else:
             # We should use another branch
             return super().validate(value, field)

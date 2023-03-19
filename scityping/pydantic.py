@@ -81,7 +81,7 @@ class ModelMetaclass(PydanticModelMetaclass):
                 orig_get_validators = getattr(T, "__get_validators__", None)
                 if not orig_get_validators:
                     try:
-                        T.__get_validators__ = _get_dataclass_validator
+                        T.__get_validators__ = _get_dataclass_validator(T)
                     except AttributeError:
                         logger.error(
                             "Cannot add attribute '__get_validators__' to the "
@@ -104,10 +104,17 @@ class BaseModel(PydanticBaseModel, metaclass=ModelMetaclass):
 class GenericModel(PydanticGenericModel, BaseModel):
     pass
 
-def _get_dataclass_validator():
-    yield _dataclass_prevalidator
+def _get_dataclass_validator(T: type):
+    def _dataclass_type_match(value):
+        if not isinstance(value, T):
+            raise TypeError(f"Value is not of type `{T.__qualname__}`")
+        return value
+    def _get_validators():
+        yield _dataclass_deserializer
+        yield _dataclass_type_match
+    return _get_validators
 
-def _dataclass_prevalidator(value):
+def _dataclass_deserializer(value):
     if json_like(value, Dataclass._registry):
         return Dataclass.validate(value)
     else:
