@@ -1,1 +1,6 @@
-Move smttask_ml/tests/test_serialization to scityping/tests/test_scipy
+Merge smttask/tests/test_typing::test_pure_functions with scityping/tests/test_purefunctionMove
+-> Should test specifying the type: PureFunction[[Any], int]
+
+smttask_ml/tests/test_serialization to scityping/tests/test_scipy
+
+

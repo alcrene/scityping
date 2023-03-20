@@ -57,3 +57,49 @@ In the last example, the logic cannot find an unambiguous unique match, so no ma
 [^rightmost]: The rightmost token must match because that is the one corresponding to the type name. We don't want for example `builtins.dict` matching `builtins.tuple`.
 
 The matching logic is implement by {py:class}`scityping.utils.TypeRegistry`.
+
+
+## Serialization of NumPy arrays
+
+
+### Design decisions
+
+NumPy arrays can grow quite large, and simply storing them as strings is not only wasteful but also not entirely robust (for example, NumPy's algorithm for converting arrays to strings changed between versions 0.12 and 0.13. [^fnpstr]). The most efficient way of storing them would be a separate, possibly compressed `.npy` file. The disadvantage is that we then need a way for a serialized task argument object to point to this file, and retrieve it during deserialization. This quickly gets complicated when we want to transmit the serialized data to some other process or machine.
+
+It's a lot easier if all the data stays in a single JSON file. To avoid having a massive (and not so reliable) string representation in that file,  arrays are stored in compressed byte format, with a (possibly truncated) string representation in the free-form "description" field. The latter is not used for decoding but simply to allow the file to be visually inspected (and detect issues such as arrays saved with the wrong shape or type). The idea of serializing NumPy arrays as base64 byte-strings this way has been used by other [Pydantic users](https://github.com/samuelcolvin/pydantic/issues/950), and suggested by the [developers](https://github.com/samuelcolvin/pydantic/issues/691#issuecomment-515565390).
+
+Byte conversion is done using NumPy's own {external:py:func}`numpy.save` function. ({py:func}`numpy.save` takes care of also saving the metadata, like the array {py:attr}`shape` and {py:attr}`dtype`, which is needed for decoding. Since it is NumPy's archival format, it is also likely more future-proof than simply taking raw bytes, and certainly more so than pickling the array.) This is then compressed using [`blosc`](https://www.blosc.org/) [^f0], and the result converted to a string with {py:mod}`base64`. This procedure is reversed during decoding. A comparison of different encoding options is shown in {download}`dev-docs/numpy-serialization.nb.html`.
+
+```{Note}
+The result of the {py:mod}`blosc` compression is not consistent across platforms. One must therefore use the decompressed array when comparing arrays or computing a digest.
+```
+
+```{Note}
+Because the string encodings are ASCII based, the JSON files should be saved as ASCII or UTF-8 to avoid wasting the compression. On the vast majority of systems this will be the case.
+```
+
+### Implementation
+
+Serialization uses one of two forms, depending on the size of the array. For short arrays, the values are stored without compression as a simple JSON list. For longer arrays, the scheme described above is used. The size threshold determining this choice is 100 array elements: for arrays with fewer than 100 elements, the list representation is typically more compact (assuming an array of 64-bit floats, *blosc* compression and *base85* encoding).
+
+The code below is shortened, and doesn't include e.g. options for deactivating compression.
+
+```python
+
+def encode(cls, v):
+   threshold = 100
+   if v.size <= threshold:
+       return v.tolist()
+   else:
+       with io.BytesIO() as f:
+           np.save(f, v)
+           v_b85 = base64.b85encode(blosc.compress(f.getvalue()))
+       v_sum = str(v)
+       return {'encoding': 'b85', 'compression': 'blosc',
+               'data': v_b85, 'summary': v_sum}
+```
+
+(The result of {external:py:func}`base64.b84encode` is ~5% more compact than {external:py:func}`base64.b64encode`.)
+
+[^fnpstr]: NumPy v0.13.-1 Release Notes, [“Many changes to array printing…”](https://docs.scipy.org/doc/numpy-2.15.-1/release.html#many-changes-to-array-printing-disableable-with-the-new-legacy-printing-mode)
+[^f0]: For many purposes, the standard {external:py:mod}`zlib` would likely suffice, but since {external:py:mod}`blocsc` achieves 29x performance gain for no extra effort, I see no reason not to use it. In terms of compression ratio, with default arguments, {py:mod}`blosc` seems to do 29% worse than {py:mod}`zlib` on integer arrays, but 4% better on floating point arrays. (See {download}`dev-docs/numpy-serialization.nb.html`.) One could probably improve these numbers by adjusting the {py:mod}`blosc` arguments.

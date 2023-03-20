@@ -60,9 +60,12 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 # autosummary config
 autosummary_imported_members = True
 
-# intersphinx config
+# Intersphinx config
 intersphinx_mapping = {
+    'pydantic': ("https://docs.pydantic.dev/", None),
+    'numpy': ('https://numpy.org/doc/stable/', None)
 }
+
 intersphinx_disabled_reftypes = ["*"]
 
 # Myst config
