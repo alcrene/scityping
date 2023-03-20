@@ -11,7 +11,8 @@ Provides:
 from typing import TYPE_CHECKING, Any, Type
 from functools import partial
 from dataclasses import is_dataclass
-from pydantic import BaseModel as PydanticBaseModel, __version__ as pydantic_version
+from importlib.metadata import version
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic.main import (ModelMetaclass as PydanticModelMetaclass,
                            ValidationError as PydanticValidationError)
 from pydantic.generics import GenericModel as PydanticGenericModel
@@ -93,7 +94,7 @@ class ModelMetaclass(PydanticModelMetaclass):
         encoder = partial(scityping_encoder, base_encoder=obj.__json_encoder__)
         obj.__json_encoder__ = staticmethod(encoder)
         # If Pydantic version is ⩽ 1.8, apply patch to allow their subclasses to override root validators.
-        _pydantic_version = tuple(int(i) for i in pydantic_version.split("."))
+        _pydantic_version = tuple(int(i) for i in version("pydantic").split("."))
         if _pydantic_version <= (1, 8):
             obj = remove_overridden_validators(obj)
         return obj
