@@ -2,6 +2,7 @@ import sys
 import re
 import logging
 from collections import defaultdict
+from itertools import tee
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +11,41 @@ class NotFound:
 
 class UnsafeDeserializationError(RuntimeError):
     pass
+
+def partition_iterable(pred, iterable):
+    """
+    Returns a 2-tuple of iterables derived from the input iterable.
+    The first yields the items that have ``pred(item) == False``.
+    The second yields the items that have ``pred(item) == True``.
+
+        >>> is_odd = lambda x: x % 2 != 0
+        >>> iterable = range(10)
+        >>> even_items, odd_items = partition(is_odd, iterable)
+        >>> list(even_items), list(odd_items)
+        ([0, 2, 4, 6, 8], [1, 3, 5, 7, 9])
+
+    If *pred* is None, :func:`bool` is used.
+
+        >>> iterable = [0, 1, False, True, '', ' ']
+        >>> false_items, true_items = partition(None, iterable)
+        >>> list(false_items), list(true_items)
+        ([0, False, ''], [1, True, ' '])
+
+
+    Copied from more-itertools (MIT licensed):
+    <https://more-itertools.readthedocs.io/en/stable/api.html#more_itertools.partition>
+
+    """
+    if pred is None:
+        pred = bool
+
+    evaluations = ((pred(x), x) for x in iterable)
+    t1, t2 = tee(evaluations)
+    return (
+        (x for (cond, x) in t1 if not cond),
+        (x for (cond, x) in t2 if cond),
+    )
+
 
 def deref_module_name(val):
     """
@@ -100,9 +136,13 @@ class LazyDict(dict):
 
 def get_type_key(obj: type):
     try:
-        return f"{obj.__module__}.{obj.__qualname__}"
+        serialization_key = obj.__qualname__
+        module = obj.__module__
     except AttributeError:
         raise TypeError("`get_type_key` accepts only instances of `type`.")
+    # Allow types to override their serialization key; this is used by generics like PureFunction
+    serialization_key = getattr(obj, "__serialization_key__", serialization_key)
+    return f"{module}.{serialization_key}"
 
 class TypeRegistry(dict):
     """A registry mapping serializable type keys to the types themselves.

@@ -3,12 +3,13 @@ from __future__ import annotations
 import abc
 import logging
 import textwrap
+import inspect
 from typing import ClassVar, Union, Type, Any, Literal, Callable, List, Tuple
 from collections.abc import (
     Callable as Callable_, Sequence as Sequence_, Iterable as Iterable_,
     Mapping as Mapping_)
 from dataclasses import fields, is_dataclass
-import inspect
+from types import FunctionType
 from .utils import get_type_key, TypeRegistry
 from .typing import StrictStr, StrictBytes, StrictInt, StrictFloat, StrictBool
 
@@ -62,8 +63,10 @@ def json_like(value: Any, type_str: Union[str,List[str]],
 # Recursive reduction
 
 def deep_reduce(v, **kwargs):
+    from .functions import serialize_function  # HACK !! We should put this in utils or something, or better – avoid the need to special case Callables at all
     return (v.deep_reduce(v, **kwargs) if isinstance(v, Serializable)
             else Dataclass.deep_reduce(v, **kwargs) if (is_dataclass(v) and not isinstance(v, type))
+            else serialize_function(v) if isinstance(v, FunctionType)  # Only serialize plain functions – not callable classes, methods, lambdas, etc.
             else v)
 
 # ###############
@@ -214,7 +217,7 @@ class Serializable:
             if not issubclass(base, T)) + (T,)
         # Tell all the parents of `cls` that they can serialize `T`.
         for C in type.mro(cls):
-            if issubclass(C, Serializable):
+            if issubclass(C, Serializable) and T not in C._registry:
                 C._registry[T] = cls
 
 
@@ -223,7 +226,7 @@ class Serializable:
         yield cls.validate
 
     def __reduce__(self):  # Pickle serialization hook
-        return (self.validate, (self.reduce(self),))
+        return (self.validate, (self.deep_reduce(self),))
 
     @classmethod
     def validate(cls, value, field=None):  # `field` not currently used: only there for consistency
@@ -370,9 +373,6 @@ class Serializable:
         #   Pydantic in particular relies on the "wrong" types raising exceptions,
         #   in order to try the next type in a list.
         else:
-            # try:
-            #     return cls(value)
-            # except Exception as e:
             # Give up and print an error message
             valuestr = str(value)
             if len(valuestr) > 1000: valuestr = valuestr[:999] + "…"
@@ -679,7 +679,7 @@ def validate_dataclass_field(val, T: type):
     - frozenset
     - scityping.NoneType
 
-    Special types
+    Generic types
 
     - Union
     - Optional
@@ -692,14 +692,24 @@ def validate_dataclass_field(val, T: type):
     - Literal (args must not be Serializable types)
     - Dict
     - Type (via base_types.Type)
+    - Callable (accepts all callables; deserializes only PureFunction)
 
     """
 
     from . import base_types  # Imported here to avoid cyclic import
 
-    ## Support for generic types ##
-
     __origin__ = getattr(T, "__origin__", None)
+
+    ## Simplest case: `val` is already of type `T` ##
+    # NB: This works even if `T` is not a deserializable type
+
+    if __origin__ is None and isinstance(T, type) and isinstance(val, T):
+        # (Something like Callable[[int],None] is still a type, but would
+        #  raise TypeError in the isinstance (also we want to continue and 
+        #  check the signature). The __origin__ skips generic types.
+        return val
+
+    ## Support for generic types ##
 
     # Union
     if __origin__ is Union:
@@ -715,6 +725,7 @@ def validate_dataclass_field(val, T: type):
                 except TypeError as e:
                     err_msgs.append(str(e))
             else:
+                # None of the types succeeded in deserializing: raise error, with all concatenated messages
                 err_str = "\n".join(f"{subT} - {msg}"
                                     for subT, msg in zip(T.__args__, err_msgs))
                 err_str = textwrap.indent(err_str, "  ")
@@ -760,6 +771,29 @@ def validate_dataclass_field(val, T: type):
         else:
             # A plain `typing.Type` with no argument will ĥave `__origin__` but no `__args__`
             return base_types.Type.validate(val)
+    # Callable
+    elif __origin__ is Callable_:
+        from .functions import matching_signature, deserialize_function
+        if isinstance(val, Callable_):
+            # `val` is already a callable: just need to check signature
+            if matching_signature(val, T):
+                return val
+            else:
+                raise TypeError(f"Signature of function {val} does not match {T}.")
+        elif (isinstance(val, Sequence_)
+              and len(val) == 2
+              and isinstance(val[0], str)):
+            if "PureFunction" in val[0]:
+                return Serializable.validate(val)
+            else:
+                raise TypeError(f"Serialized '{val[0]}' is not a recognized Callable type")
+        elif isinstance(val, str):
+            logger.warning("Calling `deserialize_function` without any  namespace: this "
+                           "is likely to fail except for simple functions. For more reliable "
+                           "deserialization, ensure functions are deserialized via `PureFunction`.")
+            return deserialize_function(val)
+        else:
+            raise TypeError(f"{val} is not a Callable")
 
     ## Support for Any ##
 

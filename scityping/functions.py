@@ -7,7 +7,7 @@ import operator
 import functools
 from collections.abc import Callable as Callable_
 
-from typing import Union, Callable, List, Sequence, _Final
+from typing import Union, Type, Callable, List, Sequence, _Final
 from types import new_class
 
 import numpy  # TODO: Make numpy import optional
@@ -34,8 +34,13 @@ pure_function_set = {fn: module.__name__
                      if isinstance(fn, Callable_)
                      }
 
+
 # TODO: Instead of "trust_all_inputs", use a whitelist of safe module (as in scityping.scipy.Distribution)
 # TODO: Serializing partial(PureFunction(g)) should be the same as PartialPureFunction(partial(g)), for consistent hashes
+# FIXME!: Specifying types to a PureFunction multiple times causes the following error:
+#       The Serializable TypeRegistry already contained an entry for key
+#       scityping.functions.purefunctionmeta.__getitem__.<locals>.update_namespace.<locals>.data,
+#       which has been replaced.
 
 class PureFunctionMeta(type):
     _instantiated_types = {}
@@ -89,9 +94,13 @@ class PureFunctionMeta(type):
             assert callableT['outT'] is not None
             baseT = Callable[callableT['inT'], callableT['outT']]
             argstr = f"{callableT['inT']}, {callableT['outT']}"
+            __args__ = (*callableT['inT'], callableT['outT'])
+                # Not sure that merging inT and outT is the best, but 
+                # typing.Callable does it like this
         else:
             baseT = Callable
             argstr = ""
+            __args__ = ()
         # Treat the module names, if present
         if modules:
             if argstr:
@@ -99,11 +108,31 @@ class PureFunctionMeta(type):
             argstr += ", ".join(modules)
         # Check if this PureFunction has already been created, and if not, do so
         key = (cls, baseT, tuple(modules))
+        # We set Serializable's subtype registry key ourselves, otherwise the 
+        # automatically determined one looks like scityping.functions.purefunctionmeta.__getitem__.<locals>.update_namespace.<locals>.data
+        # which is not informative and causes name conflicts.
+        if callableT['inT']:
+            serialization_key = f"{cls.__qualname__}[[{','.join(T.__qualname__ for T in callableT['inT'])}], {callableT['outT'].__qualname__}]"
+        else:
+            serialization_key = cls.__qualname__  # Equivalent to letting utils.get_type_key automatically determine the key
         if key not in cls._instantiated_types:
+            def update_namespace(namespace):
+                # All subclasses of Serializable need their own nested Data class
+                class Data(cls.Data):
+                    __serialization_key__ = serialization_key + ".Data"
+                namespace["modules"] = cls.modules + modules
+                namespace["Data"] = Data
+                namespace["__args__"] = __args__
+                namespace["__serialization_key__"] = serialization_key
+                namespace["__module__"] = cls.__module__
             PureFunctionSubtype = new_class(
-                f'{cls.__name__}[{argstr}]', (cls,))
+                f'{cls.__name__}[{argstr}]', (cls,),
+                exec_body=update_namespace)
             cls._instantiated_types[key] = PureFunctionSubtype
-            PureFunctionSubtype.modules = cls.modules + modules
+            # To also allow an instance of an untyped PureFunction as a value for
+            # a typed field, we need to add PureFunction to the subclass' _registry
+            # (See docs/implementation_logic.md::Validation of functions)
+            PureFunctionSubtype.register(cls)
         # Return the PureFunction type
         return cls._instantiated_types[key]
 
@@ -154,46 +183,30 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
        module still exist at the same location, a pickled `PureFunction`
        deserializes from the source code in the serialized data.
     """
+    __args__: ClassVar[Tuple[Type,...]] = ()
     modules: List[str] = []  # Use this to list modules that should be imported into
                              # the global namespace before deserializing the function
-    # subtypes= {}  # Dictionary of {JSON label: deserializer} pairs.
-    #               # Use this to define additional PureFunction subtypes
-    #               # for deserialization.
-    #               # JSON label is the string stored as first entry in the
-    #               # serialized tuple, indicating the type.
-    #               # `deserializer` should be a function (usually the type's
-    #               # `deserialize` method) taking the serialized value and
-    #               # returning the PureFunction instance.
     # Instance variable
     func: Callable
 
     class Data(SerializedData):
-        func: Union[str,PureFunction]
+        func: Union[Callable]
+        def __post_init__(self):
+            cls = PureFunction  # TODO? Get the container of type(self) ?
+            if not isinstance(self.func, Callable_):
+                modules = [importlib.import_module(m_name) for m_name in cls.modules]
+                global_ns = {k:v for m in modules
+                                 for k,v in m.__dict__.items()}
+                # Since decorators are serialized with the function, we should at
+                # least make the decorators in this module available.
+                local_ns = {'PureFunction': PureFunction,
+                            'PartialPureFunction': PartialPureFunction,
+                            'CompositePureFunction': CompositePureFunction}
+                self.func = deserialize_function(self.func, global_ns, local_ns)
+            super().__post_init__()
+
         def encode(purefunc: PureFunction) -> str:
-            func = purefunc.func
-            if isinstance(func, PureFunction):
-                return func,
-            else:
-                return serialize_function(purefunc.func),
-        def decode(data: PureFunction.Data) -> PureFunction:
-            # return PureFunction.deserialize(data.func)
-            cls = PureFunction
-            modules = [importlib.import_module(m_name) for m_name in cls.modules]
-            global_ns = {k:v for m in modules
-                             for k,v in m.__dict__.items()}
-            # Since decorators are serialized with the function, we should at
-            # least make the decorators in this module available.
-            local_ns = {'PureFunction': PureFunction,
-                        'PartialPureFunction': PartialPureFunction,
-                        'CompositePureFunction': CompositePureFunction}
-            pure_func = deserialize_function(data.func, global_ns, local_ns)
-            # It is possible for a function to be serialized with a decorator
-            # which returns a PureFunction, or even a subclass of PureFunction
-            # In such a case, casting as PureFunction may be destructive, and
-            # is at best useless
-            if not isinstance(pure_func, cls):
-                pure_func = cls(pure_func)
-            return pure_func
+            return purefunc.func,
 
     def __new__(cls, func=None):
         # func=None allowed to not break __reduce__ (due to metaclass)
@@ -208,10 +221,6 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
                                 "does not define a partial variant.")
             else:
                 return Partial(func)
-        # if cls is PureFunction and isinstance(func, functools.partial):
-        #     # Redirect to PartialPureFunction constructor
-        #     # FIXME: What if we get here from CompositePureFunction.__new__
-        #     return PartialPureFunction(func)
         return super().__new__(cls)
     def __init__(self, func):
         if hasattr(self, 'func'):
@@ -225,8 +234,37 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
             self.__signature__ = inspect.signature(func)
         except ValueError:  # Some functions, like numpy.sin, don’t support `signature`
             pass
+    
+    @classmethod
+    def validate(cls, value, field=None):  # `field` not currently used: only there for consistency
+        # Extra check: Make sure the wrapped function is pure
+        # (validation = deserialization, so the function should already be marked pure)
+        if isinstance(value, Callable_):
+            if not is_pure_function(value):
+                raise TypeError(f"Cannot validate {value} as a PureFunction, "
+                                "because callables are assumed non-pure by default. "
+                                "To indicate that a function is pure, use the "
+                                "`scityping.functions.PureFunction` decorator.")
+        # Replace / Augment branch 2: If we use a PureFunction to validate a
+        # field with type PureFunction[[int], None], we don’t want this to fail
+        # outright
+        # !! WIP !! With more work, we could be both more stringent (allow less
+        # errors) and less stringent (allow things which do fit the pattern.)
+            if not matching_signature(value, cls):
+                raise TypeError(f"The signature of {value} does not match "
+                                f"that required by the type {cls}.\n"
+                                "Note that signature checking is still primitive: "
+                                "for example, it does not match `int` to "
+                                "`Union[int,float]`to bypass the check, use "
+                                "`PureFunction` without specifying a signature")
+        # Continue with the normal validation
+        return super().validate(value, field)
+    
     def __call__(self, *args, **kwargs):
         return self.func(*args, **kwargs)
+
+    def __str__(self):
+        return f"{type(self).__name__}({self.func})"
 
     ## Function arithmetic ##
     def __abs__(self):
@@ -273,43 +311,6 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
     def __func_src__(self, value):
         self.func.__func_src__ = value
 
-    # @classmethod
-    # def deserialize(cls, value) -> PureFunction:
-    #     if isinstance(value, PureFunction):
-    #         pure_func = value
-    #     elif isinstance(value, Callable):
-    #         pure_func = PureFunction(value)
-    #     elif isinstance(value, str):
-    #         modules = [importlib.import_module(m_name) for m_name in cls.modules]
-    #         global_ns = {k:v for m in modules
-    #                          for k,v in m.__dict__.items()}
-    #         # Since decorators are serialized with the function, we should at
-    #         # least make the decorators in this module available.
-    #         local_ns = {'PureFunction': PureFunction,
-    #                     'PartialPureFunction': PartialPureFunction,
-    #                     'CompositePureFunction': CompositePureFunction}
-    #         pure_func = deserialize_function(
-    #             value, global_ns, local_ns)
-    #         # It is possible for a function to be serialized with a decorator
-    #         # which returns a PureFunction, or even a subclass of PureFunction
-    #         # In such a case, casting as PureFunction may be destructive, and
-    #         # is at best useless
-    #         if not isinstance(pure_func, cls):
-    #             pure_func = cls(pure_func)
-    #     # elif (isinstance(value, Sequence) and len(value) > 0):
-    #     #     label = value[0]
-    #     #     if label == "PartialPureFunction":
-    #     #         pure_func = PartialPureFunction.deserialize(value)
-    #     #     elif label == "CompositePureFunction":
-    #     #         pure_func = CompositePureFunction.deserialize(value)
-    #     #     elif label in cls.subtypes:
-    #     #         pure_func = cls.subtypes[label](value)
-    #     #     else:
-    #     #         cls.raise_validation_error(value)
-    #     else:
-    #         cls.raise_validation_error(value)
-    #     return pure_func
-
     # TODO: Add arg so PureFunction subtype can be specified in error message
     @classmethod
     def raise_validation_error(cls, value):
@@ -319,26 +320,11 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
                         "or a string. "
                         f"Received {value} (type: {type(value)}).")
 
-    # @staticmethod
-    # def serialize(v) -> str:
-    #     if isinstance(v, PartialPureFunction):
-    #         return PartialPureFunction.serialize(v)
-    #     elif isinstance(v, CompositePureFunction):
-    #         return CompositePureFunction.serialize(v)
-    #     elif isinstance(v, PureFunction):
-    #         f = v.func
-    #     elif isinstance(v, Callable):
-    #         f = v
-    #     else:
-    #         raise TypeError("`PureFunction.serialize` only accepts "
-    #                         f"functions as arguments. Received {type(v)}.")
-    #     return serialize_function(f)
-
-# If pydantic is available, it is used for the Data classes, and we need to resolve the circular dependency
-pydantic_model = getattr(PureFunction.Data, "__pydantic_model__", None)
-if pydantic_model:
-    pydantic_model.update_forward_refs()
-del pydantic_model
+# # If pydantic is available, it is used for the Data classes, and we need to resolve the circular dependency
+# pydantic_model = getattr(PureFunction.Data, "__pydantic_model__", None)
+# if pydantic_model:
+#     pydantic_model.update_forward_refs()
+# del pydantic_model
 
 class PartialPureFunction(PureFunction):
     """
@@ -347,7 +333,7 @@ class PartialPureFunction(PureFunction):
     The original function may be impure.
     """
     class Data(SerializedData):
-        func: Union[PureFunction,str]
+        func: Union[Callable]
         args: tuple
         kwargs: dict
 
@@ -372,7 +358,7 @@ class PartialPureFunction(PureFunction):
                 return (func, {})  # If `func` wraps a partial, its keywords will be taken care of at a deeper level
             elif not isinstance(func, functools.partial):
                 # Serialize the function and store an empty dict of bound arguments
-                return (serialize_function(func), (), {})
+                return (func, (), {})
                 # # Make a partial with empty dict of bound arguments
                 # func = functools.partial(func)
             elif isinstance(func.func, functools.partial):
@@ -383,66 +369,14 @@ class PartialPureFunction(PureFunction):
                 if isinstance(func.func, PureFunction):
                     return (func.func, func.args, func.keywords)
                 else:
-                    return (serialize_function(func.func), func.args, func.keywords)
+                    return (func.func, func.args, func.keywords)
 
         def decode(data: PartialPureFunction.Data) -> PureFunction:
-            cls = PartialPureFunction
-            modules = [importlib.import_module(m_name) for m_name in cls.modules]
-            global_ns = {k:v for m in modules
-                             for k,v in m.__dict__.items()}
-            if isinstance(data.func, Callable):
-                func = data.func
-            else:
-                func = deserialize_function(data.func, global_ns)
-            # if isinstance(func, cls):
-            #     raise NotImplementedError(
-            #         "Was a partial function saved from function decorated with "
-            #         "a PureFunction decorator ? I haven't decided how to deal with this.")
-            return PartialPureFunction(functools.partial(func, *data.args, **data.kwargs))
+            return PartialPureFunction(functools.partial(data.func, *data.args, **data.kwargs))
 
-    # def __init__(self, partial_func):
-    #     super().__init__(partial_func)
-
-    # @classmethod
-    # def deserialize(cls, value):
-    #     if not (isinstance(value, Sequence)
-    #             and len(value) > 0 and value[0] == "PartialPureFunction"):
-    #         cls.raise_validation_error(value)
-    #     assert len(value) == 3, f"Serialized PartialPureFunction must have 3 elements. Received {len(tvalue)}"
-    #     assert isinstance(value[1], str), f"Second element of serialized PartialPureFunction must be a string.\nReceived {value[1]} (type: {type(value[1])}"
-    #     assert isinstance(value[2], dict), f"Third element of serialized PartialPureFunction must be a dict.\nReceived {value[2]} (type: {type(value[2])})"
-    #     func_str = value[1]
-    #     bound_values = value[2]
-    #     modules = [importlib.import_module(m_name) for m_name in cls.modules]
-    #     global_ns = {k:v for m in modules
-    #                      for k,v in m.__dict__.items()}
-    #     func = deserialize_function(func_str, global_ns)
-    #     if isinstance(func, cls):
-    #         raise NotImplementedError(
-    #             "Was a partial function saved from function decorated with "
-    #             "a PureFunction decorator ? I haven't decided how to deal with this.")
-    #     return cls(functools.partial(func, **bound_values))
-
-
-    # @staticmethod
-    # def serialize(v):
-    #     if isinstance(v, PureFunction):
-    #         func = v.func
-    #     elif isinstance(v, Callable):
-    #         func = v
-    #     else:
-    #         raise TypeError("`PartialPureFunction.serialize` accepts only "
-    #                         "`PureFunction` or Callable arguments. Received "
-    #                         f"{type(v)}.")
-    #     if not isinstance(func, functools.partial):
-    #         # Make a partial with empty dict of bound arguments
-    #         func = functools.partial(func)
-    #     if isinstance(func.func, functools.partial):
-    #         raise NotImplementedError("`PartialPureFunction.serialize` does not "
-    #                                   "support nested partial functions at this time")
-    #     return ("PartialPureFunction",
-    #             serialize_function(func.func),
-    #             func.keywords)
+    def __str__(self):
+        func, args, kwargs = self.Data.encode(self)
+        return f"{type(self).__name__}({func}, {args}, {kwargs})"
 
 PureFunction.Partial = PartialPureFunction
 # Allow serializing something like partial(purefunc, a=2)
@@ -492,46 +426,14 @@ class CompositePureFunction(PureFunction):
         if not getattr(self, '__name__', None):
             self.__name__ = "composite_pure_function"
 
+    def __str__(self):
+        return f"{type(self).__name__}({self.func}, {self.terms})"
+
     # TODO? Use overloading (e.g. functools.singledispatch) to avoid conditionals ?
     def __call__(self, *args):
         return self.func(*(t(*args) if isinstance(t, Callable) else t
                            for t in self.terms))
 
-    # @classmethod
-    # def deserialize(cls, value):
-    #     "Format: ('CompositePureFunction', [op], [terms])"
-    #     if not (isinstance(value, Sequence)
-    #             and len(value) > 0 and value[0] == "CompositePureFunction"):
-    #         cls.raise_validation_error(value)
-    #     assert len(value) == 3
-    #     assert isinstance(value[1], str)
-    #     assert isinstance(value[2], Sequence)
-    #     func = getattr(operator, value[1])
-    #     terms = []
-    #     for t in value[2]:
-    #         if (isinstance(t, str)
-    #             or isinstance(t, Sequence) and len(t) and isinstance(t[0], str)):
-    #             # Nested serializations end up here.
-    #             # First cond. catches PureFunction, second cond. its subclasses.
-    #             terms.append(PureFunction.deserialize(t))
-    #         elif isinstance(t, PlainArg):
-    #             # Either Number or Array – str is already accounted for
-    #             terms.append(t)
-    #         else:
-    #             raise TypeError("Attempted to deserialize a CompositePureFunction, "
-    #                             "but the following value is neither a PlainArg "
-    #                             f"nor a PureFunction: '{value}'.")
-    #     return cls(func, *terms)
-
-    # @staticmethod
-    # def serialize(v):
-    #     if isinstance(v, CompositePureFunction):
-    #         assert v.func in operator.__dict__.values()
-    #         return ("CompositePureFunction",
-    #                 v.func.__name__,
-    #                 v.terms)
-    #     else:
-    #         raise NotImplementedError
 
 #################################################
 ##               Utilities                     ##
@@ -547,10 +449,140 @@ from itertools import chain
 from types import FunctionType
 from typing import Callable, Optional
 
+import ast
+if not hasattr(ast, "unparse"): # unparse is available only for >3.9, but the astunparse package backports to earlier versions
+    try:
+        import astunparse
+    except ModuleNotFoundError:
+        logger.warning("You may want to install `astunparse` for more reliable "
+                       "function serialization, or upgrade to Python ≥3.9.")
+    else:
+        ast.unparse = astunparse.unparse
+import textwrap
+
 from .config import config
 from .utils import UnsafeDeserializationError
 
 logger = logging.getLogger(__name__)
+
+def is_pure_function(f: Union[Callable, Any]) -> bool:
+    """
+    Return True if `f` is (very probably)[#]_ a pure function.
+    Whether a function is pure is very difficult to determine automatically,
+    and we rely on users to identify which functions are pure. Specifically,
+    this returns `True` if one of following conditions is met:
+
+    - `f` is not callable (trivial case)
+    - `f` was decorated with `PureFunction`.
+    - `f` is defined in one of the following modules, which are know to
+      define pure functions:
+        + `operator`
+        + `numpy` (global namespace only)
+    - `f` is a partial function, and original function is pure.
+      This is checked by calling `is_pure_function` recursively.
+      (corner case: we also check bound arguments, in case on of them is a function)
+
+    In all other situations, the returned value will be False.
+
+    .. [#] We say “very probably” because it is possible, for example, to
+       decorate a non-pure function with `PureFunction`, or to monkey patch a
+       non-pure function into `operator`. In practice, as long as the user does
+       not engage in such self-destructive behaviour, and is careful to only
+       mark as pure functions which really are pure, this function is reliable.
+    """
+    return (not isinstance(f, Callable_)
+            or isinstance(f, PureFunction)
+            or f in pure_function_set
+            or (isinstance(f, functools.partial)
+                and is_pure_function(f.func)
+                and all(is_pure_function(a) for a in f.args)
+                and all(is_pure_function(kw) for kw in f.keywords))
+            )
+
+def matching_signature(f: Callable, CallableT: Type):
+    """
+    Return `True` if the signature of `f` matches the type of `CallableT`.
+    `CallableT` would normally be created as either `Callable[[int, int] bool]`
+    or `PureFunction[[int, int] bool]`.
+
+    .. CAUTION:: This function currently only supports exact type matches in
+       the signature. So if the type is `Callable[[Union[int,float]], bool]`
+       and the given function is `def f(a:int) -> bool`, it will fail
+       becaues `int == Union[int,float]` returns `False`.
+       However, if the function omits type hints for certain arguments, then
+       those arguments always match.
+    """
+    if not getattr(CallableT, "__args__", None):
+        return True  # If no types are given, everything matches
+
+    inT = CallableT.__args__[:-1]
+    outT = CallableT.__args__[-1]
+    sig = inspect.signature(f)
+    pos_only_params = {nm: p for nm, p in sig.parameters.items()
+                       if p.kind == p.POSITIONAL_ONLY}
+    pos_or_kw_params = {nm: p for nm, p in sig.parameters.items()
+                        if p.kind == p.POSITIONAL_OR_KEYWORD}
+    kw_only_params = {nm: p for nm, p in sig.parameters.items()
+                      if p.kind == p.KEYWORD_ONLY}
+    req_params = {nm: p for nm, p in sig.parameters.items()
+                  #if p.kind in {p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD}
+                  if p.default is inspect._empty}
+    # TODO? Do something with VAR_POSITIONAL argument ?
+
+    # Check that the number of args match
+    if (len(inT) < len(req_params)
+          or len(inT) > len(pos_only_params) + len(pos_or_kw_params) + len(kw_only_params)):
+        return False
+
+    # If available, check that the output type matches
+    if sig.return_annotation is not inspect._empty:
+        if sig.return_annotation != outT:
+            return False
+
+    # Check that the positional only arguments types match (fixed order)
+    for p, T in zip(pos_only_params.values(), inT):
+        if p.annotation is inspect._empty:
+            continue
+        elif p.annotation != T:
+            return False
+
+    # Check that the other arguments match.
+    # Since they can be passed by keyword, the order does not matter
+    # First we check that all required args in the signature match a type in CallableT
+    nonpos_inT = list(inT[len(pos_only_params):])
+    req_Ts = [p.annotation for p in sig.parameters.values()
+              if (p.kind in {p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY}
+                  and p.default is inspect._empty
+                  and p.annotation is not inspect._empty)]
+    opt_Ts = [p.annotation for p in sig.parameters.values()
+              if (p.kind in {p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY}
+                  and p.default is not inspect._empty
+                  and p.annotation is not inspect._empty)]
+    no_ann = [p for p in sig.parameters.values()
+              if (p.kind in {p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY}
+                  and p.annotation is inspect._empty)]
+    for sigT in req_Ts:
+        try:
+            nonpos_inT.remove(sigT)
+        except ValueError:
+            # The function has a required arg which doesn’t match a type in CallableT
+            return False
+
+    # Any remaining types in CallableT must match one in the signature
+    # Exception: if an argument has no type annotation, it can match any arg in CallableT
+    missed_matches = 0
+    for annT in nonpos_inT:
+        try:
+            opt_Ts.remove(annT)
+        except ValueError:
+            # CallableT has an arg which doesn’t match one in signature, even an optional one
+            missed_matches += 1
+    # Number of missed matches must not exceed number of non-annotated arguments in signature
+    if missed_matches > len(no_ann):
+        return False
+
+    # Passed all the tests => return True
+    return True
 
 def split_decorators(s):
     s = s.strip()
@@ -562,17 +594,6 @@ def split_decorators(s):
         # print(line); print(decorator_lines); print(s)
     return decorator_lines, s
 
-
-import ast
-if not hasattr(ast, "unparse"): # unparse is available only for >3.9, but the astunparse package backports to earlier versions
-    try:
-        import astunparse
-    except ModuleNotFoundError:
-        logger.warning("You may want to install `astunparse` for more reliable "
-                       "function serialization, or upgrade to Python ≥3.9.")
-    else:
-        ast.unparse = astunparse.unparse
-import textwrap
 def remove_comments(s, on_fail='warn'):
     """
     Remove comments and doc strings from Python source code passed as string.

@@ -1,6 +1,10 @@
-Merge smttask/tests/test_typing::test_pure_functions with scityping/tests/test_purefunctionMove
+Merge smttask/tests/test_typing::test_pure_functions and with scityping/tests/test_purefunction
 -> Should test specifying the type: PureFunction[[Any], int]
 
 smttask_ml/tests/test_serialization to scityping/tests/test_scipy
 
 
+In base.py: Remove the imports `from .functions import …`
+- Logically functions.py comes after base.py
+  Because of this, these imports are inside functions instead of at the top of the module
+- Option: move `serialize_function` and `deserialize_function` to utils.py

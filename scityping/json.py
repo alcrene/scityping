@@ -1,6 +1,8 @@
 from typing import Any
+from collections.abc import Callable
 from dataclasses import is_dataclass
 from .base import ABCSerializable, Serializable, Dataclass
+from .functions import serialize_function
 
 try:
     from pydantic.main import ValidationError
@@ -49,6 +51,8 @@ def scityping_encoder(obj: Any, base_encoder=None) -> Any:
         # They are worth special-casing because they are one of the basic types
         # used for packaging data, in particular for our nested Data classes
         return Dataclass.deep_reduce(obj)
+    elif isinstance(obj, Callable):        # NB: We don't want to do this within 'Data.encode', because sometimes we
+        return serialize_function(obj)     #     use 'encode' without going all the way to a JSON string
     elif base_encoder:
         return base_encoder(obj)
     else:

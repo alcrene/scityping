@@ -26,6 +26,49 @@ This logic relies on two registries:
   For each serializable type `S`, {py:func}`scityping.utils.get_type_key` returns a unique key string; this key serialized along with the data, and allows the validation logic to determine exactly which deserializer to use.  
   Each serializable type maintains its own subtype registry, so that entries in the registry for `Array` only correspond to subclasses of `Array`, or at least types which are Liskov-substitutable.  
 
+### Validation of functions
+
+In analogy with `typing`'s `Callable`, {py:class}`scityping.functions.PureFunction` can be used either on its own or by specifying the argument and output types:
+
+```python
+class MyClass(Serializable):
+    class Data(SerializedData)
+        f1: PureFunction
+        f2: PureFunction[[int, float], bool]
+```
+
+The rules for validation are as one would expect:
+- `PureFunction` accepts any pure function
+- `PureFunction[[int, float], bool]` accepts any pure function whose signature matches `(int, float) -> bool`.
+  Importantly, an instance of `PureFunction` is still accepted, if it's signature matches.
+
+This last point complicates the implementation, because it means that we have two-way equivalence between types (`PureFunction[[int, float], bool]` can accept a `PureFunction`, and vice versa). This is examplified in the diagram below (`A -> B` means “B annotation accepts A value”), and it means that the “parent accepts child” pattern we usually assume for compatibility is insufficient.
+
+```{mermaid}
+flowchart LR
+    subgraph abstract base type
+        PF[PureFunction]
+    end
+    subgraph "typed functions (examples)"
+        PFif["PureFunction[[int,float],bool]"]
+        PFii["PureFunction[[int,int],bool]"]
+    end
+    subgraph "abstract types (implementation details)"
+        PPF[PartialPureFunction]
+        CPF[CompositePureFunction]
+    end
+    PF <--> PFif
+    PF <--> PFii
+    PPF --> PF
+    CPF --> PF
+    PPF --> PFif
+    PPF --> PFii
+    CPF --> PFif
+    CPF --> PFii
+```
+
+The solution however is quite simple: when we create a typed subclass like `PureFunction[[int,float],bool]`, we add `PureFunction` to its subtype dictionary ($\mathcal{R}_t$, `_registry`). The wrapper for `PureFunction.validate` then ensures that only functions matching the signature are accepted.
+
 ## Serialization logic
 
 An important goal of *scityping* is to allow writing code that will serialize variables without knowing in advance what the type of those variables are. This is implemented via a dispatch mechanism in the encoding method of the base class, {py:meth}`Serializable.reduce`. Given subclass `S` ⩽ `Serializable`, then `S.reduce(obj)` will do the following:

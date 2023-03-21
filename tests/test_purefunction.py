@@ -23,7 +23,7 @@ def test_purefunction():
 
     # Test reduction/reconstruction with Data object
     # Test that `config.trust_all_inputs` option works as expected
-    data = Serializable.reduce(pure_f)
+    data = Serializable.deep_reduce(pure_f)
     with pytest.raises(UnsafeDeserializationError):
         Serializable.validate(data)
     scityping.config.trust_all_inputs = True
@@ -32,7 +32,7 @@ def test_purefunction():
 
     # Nested PureFunctions get collapsed, so naturally they serialize fine
     fpp = PureFunction(PureFunction(pure_f))
-    datapp = Serializable.reduce(fpp)
+    datapp = Serializable.deep_reduce(fpp)
     assert datapp == data
     fpp2 = Serializable.validate(datapp)
     assert all(fpp(x) == fpp2(x) for x in [3, 5, 8, 100, 101])
