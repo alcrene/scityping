@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from scityping.pydantic import BaseModel, dataclass
 
 from typing import List, Tuple
-from scityping.numpy import NPValue, Array, NPGenerator, RandomState
+from scityping.numpy import NPValue, Array, NPGenerator, RandomState, SeedSequence
 from scityping.pint import PintUnit, PintValue
 
 # TODO: Systematically test casting of NPValue and Array, especially with
@@ -153,6 +153,30 @@ def test_numpy(caplog):
         m2_npint = Model2(a=-0.5, b=-0.1, w=wint, dt=0.01)
 
     # Import after defining Model to test difference in mapping of `float` type
+
+def test_seedseq():
+    class SeedModel(BaseModel):
+        seedseq: SeedSequence
+
+    from numpy.random import SeedSequence as SeedSeq
+
+    seedseq1 = SeedSeq()
+    seedseq2 = SeedSeq(452)
+    seedseq3 = SeedSeq(spawn_key=(2,3))
+    seedseq4 = SeedSeq((212,333), spawn_key=(2,3))
+    seedseq5 = SeedSeq(212, spawn_key=(2,3), pool_size=8)
+
+    seedseq3.spawn(2)  # Increments n_children_spawned
+    seedseq5.spawn(3)  # Increments n_children_spawned
+
+    for seedseq in [seedseq1, seedseq2, seedseq3, seedseq4, seedseq5]:
+        seedseqb = SeedModel.parse_raw(SeedModel(seedseq=seedseq).json()).seedseq
+        assert seedseq.generate_state(1)[0] == seedseq.generate_state(1)[0]
+        # If n_children_spawned was serialized, spawning new children will start
+        # where the pre-serialized SeedSequence left off
+        child = seedseq.spawn(10)[7]
+        childb = seedseqb.spawn(10)[7]
+        assert child.generate_state(1)[0] == childb.generate_state(1)[0]
 
 def test_rng():
     class RandomModel(BaseModel):

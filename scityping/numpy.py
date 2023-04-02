@@ -613,3 +613,22 @@ class RandomState(Serializable, np.random.RandomState):
     #                       {'type': 'number'}]}
     #           ])
 
+# ####
+# NumPy SeedSequence
+#
+# NOTE: A serialized `SeedSequence` always has a fixed entropy, even when
+#    it was created with `entropy=None`. If you need to serialize a `SeedSequence`
+#    which returns different values every time it is loaded, you may serialize
+#    the arguments and recreate the `SeedSequence` in your code. But also
+#    consider that serializing a non-deterministic object is an anti-pattern.
+
+class SeedSequence(Serializable, np.random.SeedSequence):
+    class Data(SerializedData):
+        entropy           : Union[int,List[int]]
+        spawn_key         : Tuple[int,...]
+        pool_size         : int
+        n_children_spawned: int
+        def encode(seedseq) -> SeedSequence.Data:
+            return (seedseq.entropy, seedseq.spawn_key,
+                    seedseq.pool_size, seedseq.n_children_spawned)
+
