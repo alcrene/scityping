@@ -55,7 +55,7 @@ def json_like(value: Any, type_str: Union[str,List[str]],
         type_str = [type_str]
     casefold = (lambda v: v) if case_sensitive else str.casefold
     return any(
-        (not isinstance(value, str) and isinstance(value, Sequence_) and value
+        (not isinstance(value, str) and isinstance(value, Sequence_) and len(value)
          and isinstance(value[0], str) and casefold(value[0]) == casefold(type_str_))
         for type_str_ in type_str)
 
@@ -571,6 +571,10 @@ import re
 from inspect import getmodule
 from dataclasses import dataclass, asdict, FrozenInstanceError
 from typing import Union, Dict, List
+try:
+    from typing import _BaseGenericAlias as BaseGenericAlias
+except ImportError:
+    from typing import _GenericAlias as BaseGenericAlias  # Python ⩽ 3.8
 
 # The `Dataclass` type is special cased: it is identified with `is_dataclass`
 # rather than with `isinstance`, so we don't need to register a base class.
@@ -713,8 +717,10 @@ def validate_dataclass_field(val, T: type):
 
     # Union
     if __origin__ is Union:
-        if isinstance(val, T.__args__):
-            # Equivalent to smart_union: if value is already an instance of any type, don’t change it
+        if isinstance(val, tuple(_T for _T in T.__args__ if not isinstance(_T, BaseGenericAlias))):
+            # Similar to smart_union: if value is already an instance of any type, don’t change it
+            # CAVEAT: Using `isinstance` with generic types like `List[int]` raises TypeError, so we need to remove them from the check.
+            #         Consequently this does not work if `val` should match a generic type: then we just do the normal left-to-right coercion. 
             return val
         else:
             # Try coercing, going left to right in the types
@@ -938,6 +944,11 @@ def validate_dataclass(dc, inplace=False):
         # NB: field.type is often stored as a string
         if isinstance(dc_field_type, str):
             dc_field_type = get_type_annotation(dc_field_type, ns)
+        if isinstance(dc_field_type, str):
+            # get_type_annotation was unable to resolve the type annotation
+            raise RuntimeError(f"Unable to resolve the type '{dc_field_type}'. "
+                               "Are you sure the types are defined "
+                               f"in the module '{dc_mod.__name__}'?")
 
         _val = validate_dataclass_field(_val, dc_field_type)
 
@@ -1024,7 +1035,9 @@ class Dataclass(Serializable):
         # Branch 1: Subclasses which overwrite Data to set their own fields
         # (AFAIK, branch 2 should always suffice, but is more verbose since
         #  it wraps everything in an extra layer with 'type' and 'data')
-        if (isinstance(value, cls.Data)
+        if isinstance(value, cls):
+            return validate_dataclass(value, inplace=True)
+        elif (isinstance(value, cls.Data)
               and is_dataclass(cls)
               and cls.__dataclass_fields__.keys() <= value.__dataclass_fields__.keys()):
               # Additional tests needed for types which subclass Dataclass but don’t
@@ -1034,8 +1047,11 @@ class Dataclass(Serializable):
                          for dc_field in fields(value)}
             return cls(**dc_kwargs)
         elif isinstance(value, Dataclass.Data):
-            value = validate_dataclass(value, inplace=True)
-            return value.type(**value.data)
+            from . import base_types
+            dc_type = base_types.Type.validate(value.type)
+            new_value = dc_type(**value.data)
+            validate_dataclass(new_value, inplace=True)
+            return new_value
         elif cls is Dataclass and is_dataclass(value):
             # The generic `Dataclass` serves as an ABC for all dataclasses
             return value

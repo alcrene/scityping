@@ -1,4 +1,5 @@
 import pytest
+from typing import Union, List, Tuple
 from dataclasses import dataclass
 from pydantic import ValidationError
 from scityping import Serializable, Slice, Dataclass, config
@@ -10,9 +11,9 @@ config.safe_packages.add(__name__)
 # Dataclass definitions need to be in global scope in order to be deserializable
 @dataclass
 class DcStdTypes:
-    # i: int
-    # s: str
-    # f: float
+    i: int
+    s: Tuple[str,str]
+    f: Union[float,List[float]]
     slc: Slice
 
 @dataclass
@@ -126,19 +127,27 @@ def test_plain_dataclass():
     Test the special cases supporting serialization of plain dataclasses.
     These only support Serializable types and plain JSON types.
     """
-    obj = DcStdTypes(slc=slice(1,2,3))
+    import json
+    from scityping.json import scityping_encoder
 
-    Dataclass.reduce(obj) == ("scityping.base_types.Dataclass",
-                              ("__main__.DcStdTypes",
-                               {"slc": slice(1,2,3)}))
-    reduced_data = deep_reduce(obj)
-    reduced_data == ("scityping.base_types.Dataclass",
-                     ("__main__",
-                      {"slc": ("scityping.base_types.Slice",
-                               {"start": 1, "stop": 2, "step": 3})}))
-    assert Dataclass.deep_reduce(obj) == reduced_data
-    objb = Dataclass.validate(reduced_data)
+    obj = DcStdTypes(i=1, s=("s","s"), f=3., slc=slice(1,2,3))
+
+    assert Dataclass.reduce(obj) == ("scityping.base.Dataclass",
+                              (DcStdTypes,
+                               {"i": 1,
+                                "s": ("s","s"),
+                                "f": 3.0,
+                                "slc": slice(1,2,3)}))
+    json_data = json.dumps(obj, default=scityping_encoder)
+    assert json_data == '["scityping.base.Dataclass", [["scityping.base_types.Type", {"module": "tests.test_dataclasses", "name": "DcStdTypes"}], {"i": 1, "s": ["s", "s"], "f": 3.0, "slc": ["scityping.base_types.Slice", {"start": 1, "stop": 2, "step": 3}]}]]'
+    objb = Dataclass.validate(json.loads(json_data))
     assert objb.slc == slice(1,2,3)
+
+    # Test using Generic inside Union
+    obj = DcStdTypes(i=1, s=("s","s"), f=[3., 1., 4.], slc=slice(1,2,3))
+    json_data = json.dumps(obj, default=scityping_encoder)
+    objb = Dataclass.validate(json.loads(json_data))
+    assert objb.f == [3., 1., 4.]
 
 
 # if __name__ == "__main__":
