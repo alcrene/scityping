@@ -105,6 +105,18 @@ class Distribution(Serializable):
     be a subclass of `Distribution`. This guarantee facilitates the implementation
     of some decoders, by allowing things like ``isinstance(data, Distribution.Data)``.
     (We use this for example in our Mixture implementation.)
+
+    .. rubric:: Serialization of the random seed
+
+       In order to reproduce the samples produced by statistical distribution, it
+       is important to serialize the random state (seed) along with the parameters.
+       On the other hand, this state easily represents 95% of the serialized data,
+       and transforms a very readable serialization to an unreadable mess.
+       So serializing it when only the distribution parameters are needed is undesirable.
+       
+       To indicate whether random state should be included, use `include_rng_state`
+       option of `Data.encode`. As a convenience, the default behaviour is to
+       include state only when it was explicitely set.
     """
     class Data(abc.ABC, SerializedData):
         # Some custom distribution types (e.g. mixture) may have distributions,
@@ -256,14 +268,24 @@ class UniDistribution(Distribution, RVFrozen):
             univariate_names = (o.name for o in stats.__dict__.values()
                                 if isinstance(o, stats._distn_infrastructure.rv_generic))
             return dist_name in univariate_names
-        def encode(rv, include_rng_state=True):
+        def encode(rv, include_rng_state=None):
+            """
+            :param:include_rng_state: Whether to include than random state when serializing.
+               - `True`: Include it.
+               - `False`: Do not include it.
+               - `None`: Include it iff it differs from the default shared RNG
+                 used by all distributions unless explicitely set.
+            """
             if rv.args:
                 logger.warning(
                     "For the most consistent and reliable serialization of "
                     "distributions, consider specifying them using only keyword "
                     f"parameters. Received for distribution {rv.dist.name}:\n"
                     f"Positional args: {rv.args}\nKeyword args: {rv.kwds}")
-            random_state = rv.dist._random_state if include_rng_state else None
+            if include_rng_state is None:
+                # NB: The use of `stats.norm` to access random_state is arbitrary; any standard distribution will work
+                include_rng_state = (rv.random_state is not stats.norm.random_state)
+            random_state = rv.random_state if include_rng_state else None
             return rv.dist.name, rv.args, rv.kwds, random_state
 # NB: We need to special case multivariate distributions, because they follow
 #     a different convention (and don't have a standard 'kwds' attribute)
@@ -273,7 +295,7 @@ class MvDistribution(Distribution, MvRVFrozen):
         def valid_distname(dist_name: str) -> bool:
             # Multivariate distributions must always be serialized with subclasses
             return False
-        def encode(rv, include_rng_state=True):
+        def encode(rv, include_rng_state=None):
             raise NotImplementedError(
                 "The reduce for `Distribution` needs to be special "
                 "cased for each multivariate distribution, and this has "
@@ -289,7 +311,10 @@ class MvNormalDistribution(MvDistribution, MvNormalFrozen):
         @staticmethod
         def valid_distname(dist_name: str) -> bool:
             return dist_name == "multivariate_normal"
-        def encode(rv, include_rng_state=True):
+        def encode(rv, include_rng_state=None):
+            if include_rng_state is None:
+                # NB: The use of `stats.norm` to access random_state is arbitrary; any standard distribution will work
+                include_rng_state = (rv.random_state is not stats.norm.random_state)
             dist = rv._dist
             random_state = dist._random_state if include_rng_state else None
             if stats_has_cov_class:  # scipy ≥1.10
