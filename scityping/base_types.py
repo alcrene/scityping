@@ -11,9 +11,11 @@ from __future__ import annotations
 import abc
 import typing
 import inspect
+import collections.abc
+import typing
 from types import SimpleNamespace
 from collections.abc import Callable as Callable_
-from typing import Optional, Union, Any, Iterable, List, Tuple, Dict, Literal
+from typing import Optional, Union, Any, Iterable, List, Tuple, Literal
 from dataclasses import dataclass, asdict, fields
 
 import numbers
@@ -239,6 +241,48 @@ class Real(numbers.Real):
     # def __modify_schema__(cls, field_schema):
     #     field_schema.update(type="number")
 
+#####################
+# Dict
+#####################
+
+# !! WIP !! Currently this type is not useful, because when encoding,
+# json.JSONEncoder first tries to match the value with the types it knows
+# using `isinstance`, and only if all those matches fail does is call the
+# default encoder we provide.
+# Because `isinstance` instead of a `try...except` is used, the default encoder
+# is never called on types it recognizes, even if its own encoder fails.
+# `dict` is a type it recognizes.
+# A possible solution would be to subclass JSONEncoder and write our own
+# `_iterencode_dict`, but then we lose the possibility to use the C-compiled
+# encoder.
+
+# # See https://stackoverflow.com/a/64268475
+# # - collections.abc.MutableMapping provides the methods
+# # - typing.Dict provides the type annotations
+# # - Serializable provides serialization
+# KT = typing.TypeVar('KT')
+# VT = typing.TypeVar('VT')
+# class Dict(collections.abc.MutableMapping,
+#            typing.Dict[KT,VT],
+#            Serializable):
+#     """Supports dictionaries with any serializable keys.
+
+#     `json.dump` (and Pydantic through `json`) already support serialization
+#     of dictionaries, but they do this by serializing them as JSON dictionaries.
+#     Because JSON only supports dicts with scalar, plain data, only such dicts
+#     can be serialized with these functions.
+#     In contrast, this class serializes dictionaries as arrays of (key, value)
+#     tuples, so any serializable type can be used for both keys and values.
+#     """
+#     class Data(SerializedData):
+#         kwds: List[KT, VT]
+#         def encode(obj):
+#             list(obj.items())
+#         @classmethod
+#         def decode(cls, data: Dict.Data) -> dict:
+#             return cls(data.kwds)
+
+# Dict.register(dict)
 
 #####################
 # Type
