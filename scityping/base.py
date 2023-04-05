@@ -4,11 +4,11 @@ import abc
 import logging
 import textwrap
 import inspect
-from typing import ClassVar, Union, Type, Any, Literal, Callable, List, Tuple
+from typing import ClassVar, Union, Type, Any, Literal, List, Tuple
 from collections.abc import (
     Callable as Callable_, Sequence as Sequence_, Iterable as Iterable_,
     Mapping as Mapping_)
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, MISSING
 from types import FunctionType
 from .utils import get_type_key, TypeRegistry
 from .typing import StrictStr, StrictBytes, StrictInt, StrictFloat, StrictBool
@@ -569,8 +569,8 @@ import builtins
 import numbers
 import re
 from inspect import getmodule
-from dataclasses import dataclass, asdict, FrozenInstanceError
-from typing import Union, Dict, List
+from dataclasses import dataclass, FrozenInstanceError
+from typing import Union, Dict
 try:
     from typing import _BaseGenericAlias as BaseGenericAlias
 except ImportError:
@@ -826,6 +826,11 @@ def validate_dataclass_field(val, T: type):
     # Subclasses of ABCSerializable don't have a `validate` method, so
     # we just treat them as a non-serializable type.
     # Could we do better ?
+    elif is_dataclass(T):
+        validate = (getattr(T, "validate", None)
+                    or getattr(T, "__validate__", None)  # Used by pydantic.dataclass & scityping.pydantic.dataclass
+                    or Dataclass.validate)
+        return validate(T)
     elif T is StrictStr:
         if not isinstance(val, str): raise TypeError(f"{val} is not a string")
         return val
@@ -939,7 +944,11 @@ def validate_dataclass(dc, inplace=False):
     new_kwds = {}
     # Validate each field
     for dc_field in fields(dc):
-        _val = getattr(dc, dc_field.name)
+        _val = getattr(dc, dc_field.name, MISSING)
+        if _val is MISSING:
+            # If some fields have `init=False`, a dataclass can be initialized
+            # with some fields unset. In this case there is nothing to validate.
+            continue
         dc_field_type = dc_field.type
         # NB: field.type is often stored as a string
         if isinstance(dc_field_type, str):
@@ -958,7 +967,7 @@ def validate_dataclass(dc, inplace=False):
             except FrozenInstanceError:
                 inplace = False
                 new_kwds[dc_field.name] = _val
-        else:
+        elif dc_field.init:  # Discard non-init fields; assume the dataclass will recreate them
             new_kwds[dc_field.name] = _val
 
     # Return the dataclass if it was modified in place, or create a new one
@@ -976,15 +985,17 @@ class Dataclass(Serializable):
 
     - `int`, `float`, `str`, `bytes`
     - subclasses of `Serializable`
+    - Union, tuple, list, set, frozen set, dict
 
     NOT supported:
 
-    - Union types, like `Union[int,float]`
-    - List types, like `List[int]`
-    - Pretty much anything not listed above.
+    - Pretty much anything else.
 
     For more powerful deserialization capabilities, it is recommended to use
-    full-featured serializable types, like Pydantic's `dataclass` and `BaseModel`.
+    full-featured serializable types, like Pydantic's `dataclass` and `BaseModel`,
+    or rather their variants in `scityping.pydantic`. Use `dataclass` if you
+    just need support for more types, and `BaseModel` if you also need to
+    customize how fields are validated.
     Nevertheless, this basic support may be useful
 
     - as a “first rung” of serialization dependencies: more complex Serializable
@@ -1017,6 +1028,14 @@ class Dataclass(Serializable):
 
        Here again, if you need full serialization/deserialization support, you
        can use `scityping.pydantic.BaseModel` or `scityping.pydantic.dataclass`.
+
+    .. Rubric:: Special cases
+       - Fields with ``field(init=False)`` are not serialized. The assumption
+         is that these are automatically set by the class (typically in __post_init__),
+         and may be internal e.g. caches which we *don’t* want to serialize.
+         In cases where they should be included, define a subclass of
+         `Dataclass` with its own nested `Data`.
+
     """
     @classmethod
     def reduce(cls, dc, **kwargs):  # **kwargs required for cooperative signature
@@ -1064,4 +1083,10 @@ class Dataclass(Serializable):
         type: Type
         data: Dict[str,Any]
         def encode(dc) -> Dataclass.Data:
-            return (type(dc), asdict(dc))
+            # NB: dataclasses.asdict would make a recursive deepcopy of dc, which we don't want
+            ff = fields(dc)
+            return (type(dc), {f.name: getattr(dc, f.name)
+                               for f in fields(dc) if f.init})
+                # Fields which are excluded from init are not serialized.
+                # This is necessary with the default decoder, since such fields
+                # cannot be given to the __init__ function.

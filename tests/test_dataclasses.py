@@ -1,6 +1,6 @@
 import pytest
 from typing import Union, List, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field, KW_ONLY
 from pydantic import ValidationError
 from scityping import Serializable, Slice, Dataclass, config
 from scityping.base import deep_reduce
@@ -13,8 +13,10 @@ config.safe_packages.add(__name__)
 class DcStdTypes:
     i: int
     s: Tuple[str,str]
+    _: KW_ONLY = None  # None allows to work with < 3.10
     f: Union[float,List[float]]
     slc: Slice
+    _private: int = field(init=False)  # Test that fields excluded from init are also excluded from serialization
 
 @dataclass
 class Obj1:
