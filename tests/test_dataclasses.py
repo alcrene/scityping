@@ -141,7 +141,7 @@ def test_plain_dataclass():
                                 "f": 3.0,
                                 "slc": slice(1,2,3)}))
     json_data = json.dumps(obj, default=scityping_encoder)
-    assert json_data == '["scityping.base.Dataclass", [["scityping.base_types.Type", {"module": "tests.test_dataclasses", "name": "DcStdTypes"}], {"i": 1, "s": ["s", "s"], "f": 3.0, "slc": ["scityping.base_types.Slice", {"start": 1, "stop": 2, "step": 3}]}]]'
+    assert json_data == '["scityping.base.Dataclass", [["scityping.base_types.Type", {"module": "test_dataclasses", "name": "DcStdTypes"}], {"i": 1, "s": ["s", "s"], "f": 3.0, "slc": ["scityping.base_types.Slice", {"start": 1, "stop": 2, "step": 3}]}]]'
     objb = Dataclass.validate(json.loads(json_data))
     assert objb.slc == slice(1,2,3)
 
