@@ -956,7 +956,7 @@ def validate_dataclass(dc, inplace=False):
         if isinstance(dc_field_type, str):
             # get_type_annotation was unable to resolve the type annotation
             raise RuntimeError(f"Unable to resolve the type '{dc_field_type}'. "
-                               "Are you sure the types are defined "
+                               "Are you sure the type is defined "
                                f"in the module '{dc_mod.__name__}'?")
 
         _val = validate_dataclass_field(_val, dc_field_type)
@@ -1084,7 +1084,6 @@ class Dataclass(Serializable):
         data: Dict[str,Any]
         def encode(dc) -> Dataclass.Data:
             # NB: dataclasses.asdict would make a recursive deepcopy of dc, which we don't want
-            ff = fields(dc)
             return (type(dc), {f.name: getattr(dc, f.name)
                                for f in fields(dc) if f.init})
                 # Fields which are excluded from init are not serialized.

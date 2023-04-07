@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import ClassVar
 from pydantic import Field
-from .valconfig import ValConfig
+from valconfig import ValConfig
 
 # These are added to the namespace when deserializing a function
 import numpy as np
