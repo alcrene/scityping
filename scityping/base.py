@@ -4,7 +4,8 @@ import abc
 import logging
 import textwrap
 import inspect
-from typing import ClassVar, Union, Type, Any, Literal, List, Tuple
+from typing import get_type_hints, ClassVar, Union, Type, Any, Literal, List, Tuple
+from collections import ChainMap
 from collections.abc import (
     Callable as Callable_, Sequence as Sequence_, Iterable as Iterable_,
     Mapping as Mapping_)
@@ -570,7 +571,7 @@ import numbers
 import re
 from inspect import getmodule
 from dataclasses import dataclass, FrozenInstanceError
-from typing import Union, Dict
+from typing import Union, Dict, Generic
 try:
     from typing import _BaseGenericAlias as BaseGenericAlias
 except ImportError:
@@ -611,57 +612,6 @@ def split_type_str(s):
         raise RuntimeError(f"Unequal brackets in {s}")
     els.append("".join(el_c))
     return els
-
-def get_type_annotation(T, ns: dict):
-    if isinstance(T, str):
-        # T may have an argument of the form Union[int,float]
-        # The regex stores `Union` in m[1] and `[int,float]` in m[2]
-        # It also succeeds on the following: `scityping.Array[np.uint32, 2]`
-        m = re.match(r"([\w\.]+)(\[.*\])?", T)
-        assert m is not None, f"Regex failed to parse the type '{T}'"
-        T = ns.get(m[1], MISSING)
-        if T is MISSING:
-            # Some types allow literals in their argument (like Literal, or scityping.numpy.Array)
-            # => Evaluate, then return as is. If this isn’t inside a type argument, an error will be raised later
-
-            # Check for int or float: only numbers, possibly one '.'
-            mT = re.match(r"\d+(\.\d*)?$", m.string)
-            if mT: # int or float
-                if mT[1] is None:  # No '.' => Int
-                    T = int(m.string)
-                else:
-                    T = float(m.string)
-
-            # Ellipsis
-            elif m.string == "...":
-                T = Ellipsis
-
-            # Deref dotted names. If nothing is found, return the whole thing as a string
-            else:
-                els = m.string.split(".")
-                obj = ns.get(els[0], MISSING)
-                if obj is MISSING:
-                    T = m.string
-                else:
-                    for el in els[1:]:
-                        obj = getattr(obj, el, MISSING)
-                        if obj is MISSING:  # Dotted name not found => return original type string 
-                            T = m.string
-                            break
-                    else:  # All dotted names were found
-                        T = obj
-        elif m[2]:
-            # Remove the start and end brackets
-            arg = m[2][1:-1]
-            # m = re.match(r"(\w+(?:\[[^\]]*\])?,? *)+", arg)
-            # args = tuple(get_type_annotation(arg_str.strip(), ns)
-            #              for arg_str in arg.split(","))
-            args = tuple(get_type_annotation(arg_str.strip(), ns)
-                         for arg_str in split_type_str(arg))
-            if len(args) == 1:
-                args = args[0]  # Required for types like Optional
-            T = T[args]
-    return T
 
 def validate_dataclass_field(val, T: type):
     """
@@ -717,7 +667,10 @@ def validate_dataclass_field(val, T: type):
 
     # Union
     if __origin__ is Union:
-        if isinstance(val, tuple(_T for _T in T.__args__ if not isinstance(_T, BaseGenericAlias))):
+        if isinstance(val, tuple(_T for _T in T.__args__
+                                 if not (isinstance(_T, BaseGenericAlias)
+                                         or (isinstance(_T, type) and issubclass(_T, Generic)))  # Some types inherit from Generic but not _BaseGenericAlias (e.g. 'numpy.typing._array_like._SupportsArray')
+                                 )):
             # Similar to smart_union: if value is already an instance of any type, don’t change it
             # CAVEAT: Using `isinstance` with generic types like `List[int]` raises TypeError, so we need to remove them from the check.
             #         Consequently this does not work if `val` should match a generic type: then we just do the normal left-to-right coercion. 
@@ -803,14 +756,18 @@ def validate_dataclass_field(val, T: type):
 
     ## Support for Any ##
 
-    # Check if it looks like a Serializable type. If so, deserialize.
-    # Otherwise, return as-is
+    # Check if it looks like a Serializable type. If so, try to deserialize.
+    # Otherwise, or if deserialization fails, return as-is
+    # (A tuple of strings e.g. would look like serializable data.)
     if T is Any:
         if (isinstance(val, Sequence_)
               and len(val) == 2
               and isinstance(val[0], str)):
             # TODO: Call directly the right branch, rather than repeat the checks in Serializable.validate
-            return Serializable.validate(val)
+            try:
+                return Serializable.validate(val)
+            except:
+                return val
         else:
             return val
 
@@ -830,7 +787,7 @@ def validate_dataclass_field(val, T: type):
         validate = (getattr(T, "validate", None)
                     or getattr(T, "__validate__", None)  # Used by pydantic.dataclass & scityping.pydantic.dataclass
                     or Dataclass.validate)
-        return validate(T)
+        return validate(val)
     elif T is StrictStr:
         if not isinstance(val, str): raise TypeError(f"{val} is not a string")
         return val
@@ -917,6 +874,49 @@ def validate_dataclass_field(val, T: type):
         else:
             raise TypeError(f"Unrecognized type {T}. {dc_val_msg}")
 
+def _get_type_hints(dc):
+    """
+    A wrapper for typing.get_type_hints which:
+    - Merges the namespaces of all classes in the MRO (not just the lowest one)
+    - Avoids errors when special values like dataclasses.KW_ONLY are defined
+      in a parent class.
+    """
+    # # Retrieve the namespace in which to search for type definitions
+    # dc_mod = getmodule(dc)
+    # ns = {**builtins.__dict__, **(dc_mod.__dict__ if dc_mod else {})}
+    # HACK: Merge all namespaces for dataclasses in the MRO, so that the types
+    #       for fields defined in parent classes are still accessible
+    #       Better would be to resolve them with a different namespace for each class in the MRO
+    mod_mro = [getmodule(C) for C in type(dc).mro() if is_dataclass(C)]
+
+    # get_type_hints requires a real dict
+    ns = dict(ChainMap(*(m.__dict__ for m in mod_mro), vars(builtins)))
+
+    # get_type_hints raises an error if forwardrefs resolve to something which is not a type.
+    # Unfortunately, the special value dataclasses.KW_ONLY is not a type => so we need to
+    # temporarily replace it with a type.
+    # The alternative would be to require that any module which subclasses a dataclass
+    # must import all its field types, even hidden ones like KW_ONLY
+    try:
+        from dataclasses import KW_ONLY
+    except ImportError:
+        kwonly_placeholder = None  # Python <3.10 does not have KW_ONLY, so nothing to do
+    else:
+        kwonly_placeholder = type("kwonly_placeholder", (), {})
+        for k, v in ns.items():
+            if v is KW_ONLY:
+                ns[k] = kwonly_placeholder
+
+    ann_types = get_type_hints(type(dc), ns)  # get_type_hints will merge annotations from parents, but only when applied to `type(dc)`
+
+    # Now replace the KW_ONLY placeholder with its true value
+    if kwonly_placeholder is not None:
+        for C in type(dc).mro():
+            for k, v in getattr(dc, "__annotations__", {}).items():
+                if v is kwonly_placeholder:
+                    dc.__annotations__[k] = KW_ONLY
+
+    return ann_types
 
 def validate_dataclass(dc, inplace=False):
     """
@@ -925,6 +925,11 @@ def validate_dataclass(dc, inplace=False):
         inplace: bool
             If `True`, attempt to modify the dataclass `dc` in place.
             If `False`, or `dc` is frozen, a new dataclass is created.
+
+    .. Important:: If `dc` is a frozen dataclass, it cannot be updated in place.
+       In such cases a value of `inplace=True` is implicitely converted to
+       `inplace=False`. Therefore, one should always assign the return value
+       instead of relying on in-place updates.
 
     .. Note:: Deserialization support for std lib dataclasses is purposefully
        limited to simple cases. Attempting to support every corner would
@@ -938,9 +943,8 @@ def validate_dataclass(dc, inplace=False):
        hard dependency `scityping`. The features we need to do this are those
        which we support for validation.
     """
-    # Retrieve the namespace in which to search for type definitions
-    dc_mod = getmodule(dc)
-    ns = {**builtins.__dict__, **(dc_mod.__dict__ if dc_mod else {})}
+    ann_types = _get_type_hints(dc)
+
     new_kwds = {}
     # Validate each field
     for dc_field in fields(dc):
@@ -949,15 +953,16 @@ def validate_dataclass(dc, inplace=False):
             # If some fields have `init=False`, a dataclass can be initialized
             # with some fields unset. In this case there is nothing to validate.
             continue
-        dc_field_type = dc_field.type
-        # NB: field.type is often stored as a string
-        if isinstance(dc_field_type, str):
-            dc_field_type = get_type_annotation(dc_field_type, ns)
+        dc_field_type = ann_types[dc_field.name]
+        # dc_field_type = dc_field.type
+        # # NB: field.type is often stored as a string
+        # if isinstance(dc_field_type, str):
+        #     dc_field_type = get_type_annotation(dc_field_type, ns)
         if isinstance(dc_field_type, str):
             # get_type_annotation was unable to resolve the type annotation
             raise RuntimeError(f"Unable to resolve the type '{dc_field_type}'. "
                                "Are you sure the type is defined "
-                               f"in the module '{dc_mod.__name__}'?")
+                               f"in the module '{mod_mro[0].__name__}'?")
 
         _val = validate_dataclass_field(_val, dc_field_type)
 
@@ -966,7 +971,8 @@ def validate_dataclass(dc, inplace=False):
                 setattr(dc, dc_field.name, _val)
             except FrozenInstanceError:
                 inplace = False
-                new_kwds[dc_field.name] = _val
+                if dc_field.init:
+                    new_kwds[dc_field.name] = _val
         elif dc_field.init:  # Discard non-init fields; assume the dataclass will recreate them
             new_kwds[dc_field.name] = _val
 
@@ -976,6 +982,7 @@ def validate_dataclass(dc, inplace=False):
     else:
         return type(dc)(**new_kwds)
 
+# NB: We don’t decorate with `@dataclass`, so the type can be used for both frozen and mutable dataclasses
 class Dataclass(Serializable):
     """
     This class provides very basic serialization/deserialization support for
@@ -1005,12 +1012,12 @@ class Dataclass(Serializable):
     - when dealing with dataclass objects created by an external library, for
       which we cannot change the type.
 
-    .. Note:: Because there is no base dataclass, dataclasses cannot be
-       identified with the usual way of checking for a recognized base type.
-       Their support is hard-coded and specific to dataclasses, using
-       `is_dataclass` to recognized them. Since dataclasses may be used for
-       the `Data` container, they also use custom code paths for deserialization
-       to avoid recursion loops.
+    .. Note:: Because there is no base class common to all dataclasses,
+       dataclasses cannot be identified with the usual way of checking for a
+       recognized base type. Their support is hard-coded and specific to
+       dataclasses, using `is_dataclass` to recognized them. Since dataclasses
+       may be used for the `Data` container, they also use custom code paths
+       for deserialization to avoid recursion loops.
 
     .. Caution:: Use of plain dataclasses as field types for a serializable class
        is also limited. If `MyDataclass` is a plain dataclass type, then the
@@ -1037,6 +1044,7 @@ class Dataclass(Serializable):
          `Dataclass` with its own nested `Data`.
 
     """
+
     @classmethod
     def reduce(cls, dc, **kwargs):  # **kwargs required for cooperative signature
         return (get_type_key(cls), cls.Data.encode(dc))
@@ -1051,41 +1059,76 @@ class Dataclass(Serializable):
     # We need to replace branch 3, since Data doesn't actually do deserialization
     @classmethod
     def validate(cls, value, field=None):
-        # Branch 1: Subclasses which overwrite Data to set their own fields
-        # (AFAIK, branch 2 should always suffice, but is more verbose since
-        #  it wraps everything in an extra layer with 'type' and 'data')
-        if isinstance(value, cls):
-            return validate_dataclass(value, inplace=True)
-        elif (isinstance(value, cls.Data)
-              and is_dataclass(cls)
-              and cls.__dataclass_fields__.keys() <= value.__dataclass_fields__.keys()):
-              # Additional tests needed for types which subclass Dataclass but don’t
-              # redefine `Data`: in that case the fields are those of `Dataclass.Data`.
+        # Whatever we do, if `value` is a dataclass, the first step is to validate it
+        if is_dataclass(value):
             value = validate_dataclass(value, inplace=True)
-            dc_kwargs = {dc_field.name: getattr(value, dc_field.name)
-                         for dc_field in fields(value)}
-            return cls(**dc_kwargs)
-        elif isinstance(value, Dataclass.Data):
-            from . import base_types
-            dc_type = base_types.Type.validate(value.type)
-            new_value = dc_type(**value.data)
-            validate_dataclass(new_value, inplace=True)
-            return new_value
-        elif cls is Dataclass and is_dataclass(value):
-            # The generic `Dataclass` serves as an ABC for all dataclasses
+        # Branch 1: Already a dataclass of the desired type
+        if isinstance(value, cls):
             return value
+        # Branch 2: `Value` is a Data object. We may first need to validate its content,
+        #   which we then use to instantiate `cls` (c.f. Serializable.validate, branch 3)
+        elif isinstance(value, cls.Data):
+            decoder = getattr(cls.Data, "decode", None)
+            # Branch 2a: If cls.Data provides a decoder, use that.
+            if decoder:
+                return decoder(value)
+            # Branch 2b: Subclasses which override Data to set their own fields
+            #   (Overriding Data can make serialized data more compact, since it
+            #   avoid an extra nesting level with 'type' and 'data' fields.)
+            elif (is_dataclass(cls) and is_dataclass(value)  # NB: Dataclass itself is not a dataclass
+                  and value.__dataclass_fields__.keys() <= cls.__dataclass_fields__.keys()):
+                dc_kwargs = {f.name: getattr(value, f.name) for f in fields(value)}  # Make a shallow dict
+                return cls(**dc_kwargs)
+            # Branch 2c: Fallback - `cls` provides a `Data`, but not `Data.decode`.
+            #   In particular this means they do not subclass `Dataclass.Data`.
+            #   The more likely assumption would be that `Data` just includes
+            #   dataclass fields, but that situation is covered by branch 2b.
+            #   So we try the default decoder, but print a warning, since there
+            #   is a reasonable change of this assumption being wrong.
+            else:
+                logger.error(f"The class {cls.__qualname__} defines a nested `Data` class, "
+                             "but this Data class does not define a `decode` method. "
+                             "Falling back to the default one provided by `Dataclass.Data`. "
+                             f"You can avoid this message by making `{cls.__qualname__}.Data` "
+                             f"a subclass of `Dataclass.Data")
+                obj = Dataclass.Data.decode(value)
+                if ( (cls is not Dataclass and isinstance(obj, cls))   # Normal isinstance()
+                     or (cls is Dataclass and is_dataclass(obj)) ):    # When using `Dataclass` as an ABC, any dataclass is valid
+                    return obj
+                else:
+                    raise TypeError(f"Expected a value of type {cls.__qualname__}, "
+                                    f"but data serialized to a value of type {type(obj).__qualname__}.")
+        # Branch 3: `value` is a generic dataclass. It might still be of the
+        #    right type, depending of its `type` field.
+        elif isinstance(value, Dataclass.Data):
+            obj = Dataclass.Data.decode(value)
+            if ( (cls is not Dataclass and isinstance(obj, cls))   # Normal isinstance()
+                 or (cls is Dataclass and is_dataclass(obj)) ):    # When using `Dataclass` as an ABC, any dataclass is valid
+                return obj
+            else:
+                raise TypeError(f"Expected a value of type {cls.__qualname__}, "
+                                f"but data serialized to a value of type {type(obj).__qualname__}.")
+        # Branch 3: `Dataclass` can be used as an ABC for all dataclasses.
+        #   In this case we have not specified any fields, so there is also nothing to do.
+        elif cls is Dataclass and is_dataclass(value):
+            return value
+        # Branch 4: None of our dataclass-specific branches matched, so we punt
+        #   to the base’s `validate()`.
         else:
-            # We should use another branch
             return super().validate(value, field)
 
     @dataclass
     class Data:
         type: Type
-        data: Dict[str,Any]
-        def encode(dc) -> Dataclass.Data:
+        data: Dict[str,Any]  # TODO: Rename 'kwargs'
+        def encode(dc: Dataclass) -> Dataclass.Data:
             # NB: dataclasses.asdict would make a recursive deepcopy of dc, which we don't want
             return (type(dc), {f.name: getattr(dc, f.name)
                                for f in fields(dc) if f.init})
                 # Fields which are excluded from init are not serialized.
                 # This is necessary with the default decoder, since such fields
                 # cannot be given to the __init__ function.
+        def decode(data: Dataclass.Data) -> Dataclass:
+            obj = data.type(**data.data)
+            obj = validate_dataclass(obj, inplace=True)
+            return obj
