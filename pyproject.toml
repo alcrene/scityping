@@ -27,7 +27,7 @@ classifiers = [
     "Topic :: Typed"
 ]
 dependencies = [
-    "pydantic",
+    "pydantic<2",
     "valconfig"
 ]
 dynamic = ["version"]
