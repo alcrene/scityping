@@ -1,6 +1,10 @@
 import pytest
 from typing import Union, List, Tuple
-from dataclasses import dataclass, field, KW_ONLY
+try:
+    from dataclasses import dataclass, field, KW_ONLY
+except ImportError:
+    from dataclasses import dataclass, field
+    KW_ONLY = None
 from pydantic import ValidationError
 from scityping import Serializable, Slice, Dataclass, config
 from scityping.base import deep_reduce
@@ -14,8 +18,8 @@ class DcStdTypes:
     i: int
     s: Tuple[str,str]
     _: KW_ONLY = None  # None allows to work with < 3.10
-    f: Union[float,List[float]]
-    slc: Slice
+    f: Union[float,List[float]]=None
+    slc: Slice=None
     _private: int = field(init=False)  # Test that fields excluded from init are also excluded from serialization
 
 @dataclass
@@ -134,14 +138,19 @@ def test_plain_dataclass():
 
     obj = DcStdTypes(i=1, s=("s","s"), f=3., slc=slice(1,2,3))
 
+    data = {"i": 1,
+            "s": ("s","s"),
+            "f": 3.0,
+            "slc": slice(1,2,3)}
+    if KW_ONLY is None:  # Python ⩽ 3.9
+        data["_"] = None
     assert Dataclass.reduce(obj) == ("scityping.base.Dataclass",
-                              (DcStdTypes,
-                               {"i": 1,
-                                "s": ("s","s"),
-                                "f": 3.0,
-                                "slc": slice(1,2,3)}))
+                                     (DcStdTypes, data))
     json_data = json.dumps(obj, default=scityping_encoder)
-    assert json_data == '["scityping.base.Dataclass", [["scityping.base_types.Type", {"module": "test_dataclasses", "name": "DcStdTypes"}], {"i": 1, "s": ["s", "s"], "f": 3.0, "slc": ["scityping.base_types.Slice", {"start": 1, "stop": 2, "step": 3}]}]]'
+    if KW_ONLY is None:  # Python ⩽ 3.9
+        assert json_data == '["scityping.base.Dataclass", [["scityping.base_types.Type", {"module": "test_dataclasses", "name": "DcStdTypes"}], {"i": 1, "s": ["s", "s"], "_": null, "f": 3.0, "slc": ["scityping.base_types.Slice", {"start": 1, "stop": 2, "step": 3}]}]]'
+    else:  # Python ⩾ 3.10
+        assert json_data == '["scityping.base.Dataclass", [["scityping.base_types.Type", {"module": "test_dataclasses", "name": "DcStdTypes"}], {"i": 1, "s": ["s", "s"], "f": 3.0, "slc": ["scityping.base_types.Slice", {"start": 1, "stop": 2, "step": 3}]}]]'
     objb = Dataclass.validate(json.loads(json_data))
     assert objb.slc == slice(1,2,3)
 
