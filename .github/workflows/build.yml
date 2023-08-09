@@ -1,0 +1,49 @@
+# https://docs.pypi.org/trusted-publishers/using-a-publisher/
+# https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/
+# https://stackoverflow.com/questions/62968271/python-automatic-versioning-not-happening-while-running-in-github-actions
+
+name: Build Python package
+run-name: ${{ github.actor }} is building the Python package
+
+# Workflow will when a new release in the GitHub web UI.
+# It can also be triggered manually: https://docs.github.com/en/actions/using-workflows/manually-running-a-workflow#running-a-workflow
+on:
+  release:
+    types: [released]
+  workflow_dispatch:
+
+jobs:
+
+  build:
+    name: Build Python package
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.8"
+
+      - name: Install pypa/build
+        run: >-
+          python3 -m
+          pip install
+          build
+          --user
+
+      - name: Build a binary wheel and a source tarball
+        run: >-
+          python3 -m
+          build
+          --sdist
+          --wheel
+          --outdir dist/
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: release-build
+          path: dist/
