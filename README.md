@@ -210,3 +210,11 @@ In general, within scientific applications these performance considerations shou
 
 [^negligeable-comp-cost]: Unless *a lot* of builtin types are extended with serializers.
 
+## Running tests
+
+To avoid unnecessarily downloading the massive CUDA dependencies just to run the PyTorch tests, consider installing the test dependencies with the following:
+
+    pip install --index-url https://download.pytorch.org/whl/cpu torch
+    pip install -e .[test]
+
+(The CPU-only torch package is 200MB instead of 620MB.)
