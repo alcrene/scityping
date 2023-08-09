@@ -7,7 +7,7 @@ import operator
 import functools
 from collections.abc import Callable as Callable_
 
-from typing import Union, Type, Callable, List, Sequence, _Final
+from typing import ClassVar, Union, Type, Callable, List, Tuple, _Final
 from types import new_class
 
 import numpy  # TODO: Make numpy import optional
@@ -440,6 +440,7 @@ class CompositePureFunction(PureFunction):
 #################################################
 
 import logging
+logger = logging.getLogger(__name__)
 from warnings import warn
 import builtins
 import operator
@@ -447,7 +448,7 @@ import inspect
 from itertools import chain
 
 from types import FunctionType
-from typing import Callable, Optional
+from typing import Callable, Optional, Any
 
 import ast
 if not hasattr(ast, "unparse"): # unparse is available only for >3.9, but the astunparse package backports to earlier versions
@@ -462,8 +463,6 @@ import textwrap
 
 from .config import config
 from .utils import UnsafeDeserializationError
-
-logger = logging.getLogger(__name__)
 
 def is_pure_function(f: Union[Callable, Any]) -> bool:
     """
