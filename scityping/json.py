@@ -52,7 +52,17 @@ def scityping_encoder(obj: Any, base_encoder=None) -> Any:
         # used for packaging data, in particular for our nested Data classes
         return Dataclass.deep_reduce(obj)
     elif isinstance(obj, Callable):        # NB: We don't want to do this within 'Data.encode', because sometimes we
-        return serialize_function(obj)     #     use 'encode' without going all the way to a JSON string
+        try:
+            return serialize_function(obj)     #     use 'encode' without going all the way to a JSON string
+        except TypeError as e:
+            # Things like callable Pydantic models may not be serializable with the function serializer,
+            # but still serializable with the base encoder.
+            # (NB: We don’t try the base encoder first, because we want to give
+            # the function serializer priority.)
+            if base_encoder:
+                return base_encoder(obj)
+            else:
+                raise e
     elif base_encoder:
         return base_encoder(obj)
     else:
