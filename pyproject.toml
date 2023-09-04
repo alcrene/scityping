@@ -37,5 +37,11 @@ docs = ["sphinx", "myst-parser", "sphinx-book-theme", "sphinxcontrib-mermaid"]
 test = ["coverage", "pytest",
         "numpy", "scipy", "blosc", "torch", "pint", "quantities"]
 
+[project.urls]
+"Documentation" = "https://scityping.readthedocs.io/"
+"Bug Tracker" = "https://github.com/alcrene/scityping/issues"
+"Source" = "https://github.com/alcrene/scityping"
+
+
 [tool.setuptools_scm]
 write_to = "scityping/_version.py"
