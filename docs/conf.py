@@ -63,7 +63,8 @@ autosummary_imported_members = True
 
 # Intersphinx config
 intersphinx_mapping = {
-    'pydantic': ("https://docs.pydantic.dev/", None),
+    'python': ("https://docs.python.org/3", None),
+    'pydantic': ("https://docs.pydantic.dev/latest", None),
     'numpy': ('https://numpy.org/doc/stable/', None)
 }
 

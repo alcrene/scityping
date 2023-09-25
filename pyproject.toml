@@ -33,7 +33,8 @@ dependencies = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
-docs = ["sphinx", "myst-parser", "sphinx-book-theme", "sphinxcontrib-mermaid"]
+docs = ["sphinx", "myst-parser", "sphinx-book-theme", "sphinxcontrib-mermaid",
+        "numpy", "scipy", "torch", "pint", "quantities"]
 test = ["coverage", "pytest",
         "numpy", "scipy", "blosc", "torch", "pint", "quantities"]
 

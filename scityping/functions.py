@@ -389,10 +389,12 @@ class CompositePureFunction(PureFunction):
     Non-pure functions are not allowed as arguments.
 
     Typically obtained after performing operations on PureFunctions:
+
     >>> f = PureFunction(…)
     >>> g = PureFunction(…)
     >>> h = f + g
-    >>> isinstance(h, CompositePureFunction)  # True
+    >>> isinstance(h, CompositePureFunction)
+    True
 
     .. important:: Function arithmetic must only be done between functions
        with the same signature. This is NOT checked at present, although it

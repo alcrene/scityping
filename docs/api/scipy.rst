@@ -1,6 +1,6 @@
-scityping.pydantic
-==================
+scityping.scipy
+===============
 
-.. automodule:: scityping.pydantic
+.. automodule:: scityping.scipy
    :members:
    :undoc-members:

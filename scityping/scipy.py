@@ -4,16 +4,20 @@ Manifest
 
 Types:
 ------
-  + Distributions
-    - UniDistribution
-    - MvDistribution (deserialization only)
-    - MvNormalDistribution
+
++ Distributions
+
+  - UniDistribution
+  - MvDistribution (deserialization only)
+  - MvNormalDistribution
 
 JSON encoders
 -------------
-  + stats
-    - scipy.stats._distn_infrastructure.rv_frozen
-    - scipy.stats._multivariate.multi_rv
+
++ stats
+
+  - scipy.stats._distn_infrastructure.rv_frozen
+  - scipy.stats._multivariate.multi_rv
 
 
 Extending support to new distribution types
@@ -23,14 +27,15 @@ For distributions defined in scipy.stats, the best place to add support for
 them is in this module. However it is also possible for external packages to
 extend the `Distribution` hierarchy; this can be useful in at least two
 situations:
-- To support custom subclasses of scipy distributions;
-- To add support for a missing scipy distribution type, without having to
+
+* To support custom subclasses of scipy distributions;
+* To add support for a missing scipy distribution type, without having to
   maintain one's own version of `scityping`.
 
 The main additional consideration when extending these classes in a separate
 module is to ensure that all types used in annotations here are also imported
 in the module providing the extension. Otherwise Pydantic will complain about
-unprepared types still being a `ForwardRef`.
+unprepared types still being a `ForwardRef`::
 
     from scipy import stats
     from pydantic.dataclasses import dataclass
@@ -108,15 +113,15 @@ class Distribution(Serializable):
 
     .. rubric:: Serialization of the random seed
 
-       In order to reproduce the samples produced by statistical distribution, it
-       is important to serialize the random state (seed) along with the parameters.
-       On the other hand, this state easily represents 95% of the serialized data,
-       and transforms a very readable serialization to an unreadable mess.
-       So serializing it when only the distribution parameters are needed is undesirable.
-       
-       To indicate whether random state should be included, use `include_rng_state`
-       option of `Data.encode`. As a convenience, the default behaviour is to
-       include state only when it was explicitely set.
+    In order to reproduce the samples produced by statistical distribution, it
+    is important to serialize the random state (seed) along with the parameters.
+    On the other hand, this state easily represents 95% of the serialized data,
+    and transforms a very readable serialization to an unreadable mess.
+    So serializing it when only the distribution parameters are needed is undesirable.
+    
+    To indicate whether random state should be included, use `include_rng_state`
+    option of `Data.encode`. As a convenience, the default behaviour is to
+    include state only when it was explicitely set.
     """
     class Data(abc.ABC, SerializedData):
         # Some custom distribution types (e.g. mixture) may have distributions,
@@ -270,11 +275,12 @@ class UniDistribution(Distribution, RVFrozen):
             return dist_name in univariate_names
         def encode(rv, include_rng_state=None):
             """
-            :param:include_rng_state: Whether to include than random state when serializing.
-               - `True`: Include it.
-               - `False`: Do not include it.
-               - `None`: Include it iff it differs from the default shared RNG
-                 used by all distributions unless explicitely set.
+            include_rng_state: Whether to include the random state when serializing.
+
+            - `True`: Include it.
+            - `False`: Do not include it.
+            - `None`: Include it iff it differs from the default shared RNG
+              used by all distributions unless explicitely set.
             """
             if rv.args:
                 logger.warning(

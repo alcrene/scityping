@@ -144,12 +144,14 @@ class Serializable:
     # of all its parents
     _registry = TypeRegistry()
 
-    # Subclass must define a nested class `Data`
     @property
     @classmethod
     @abc.abstractmethod
     def Data(self):
-        # Which itself defines a class method `encode`
+        """
+        Any subclass of `Serializable` must define a nested class `Data`,
+        which itself defines a class method `encode`.
+        """
         # @classmethod
         # @abc.abstractmethod
         # def encode(cls, value) -> Data:
