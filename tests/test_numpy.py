@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from scityping.pydantic import BaseModel, dataclass
 
 from typing import List, Tuple
-from scityping.numpy import NPValue, Array, NPGenerator, RandomState, SeedSequence
+from scityping.numpy import NPValue, Array, RNGenerator, RandomState, SeedSequence
 
 # TODO: Systematically test casting of NPValue and Array, especially with
 #       generic types
@@ -179,7 +179,7 @@ def test_seedseq():
 
 def test_rng():
     class RandomModel(BaseModel):
-        rng: NPGenerator
+        rng: RNGenerator
 
     # # FIXME
     # RandomModel.schema()

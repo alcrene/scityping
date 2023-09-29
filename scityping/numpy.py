@@ -559,7 +559,7 @@ _ArrayType.register(np.ndarray)
 
 RNGStateDict = Dict[str, Union[int, Array[np.unsignedinteger,1]]]
 
-class NPGenerator(Serializable, np.random.Generator):
+class RNGenerator(Serializable, np.random.Generator):
     class Data(SerializedData):
         bit_generator: str                       # Philox, PCG64, SFG64, MT19937  
         state        : RNGStateDict              # Philox, PCG64, SFG64, MT19937
@@ -571,8 +571,8 @@ class NPGenerator(Serializable, np.random.Generator):
             # reduce when needed
         def encode(rng):
             return rng.bit_generator.state
-                # Since this is a dict, NPGenerator.reduce will pass by keyword to `Data`
-        def decode(data: 'NPGenerator.Data') -> np.random.Generator:
+                # Since this is a dict, RNGenerator.reduce will pass by keyword to `Data`
+        def decode(data: 'RNGenerator.Data') -> np.random.Generator:
             bg = getattr(np.random, data.bit_generator)()
             bg.state = asdict(data)
             return np.random.Generator(bg)
@@ -583,7 +583,8 @@ class NPGenerator(Serializable, np.random.Generator):
     #                         items=[{'type': 'string',
     #                                 'type': 'object'}])
 
-Generator = NPGenerator  # To match the name in NumPy
+NPGenerator = RNGenerator  # Previous name
+Generator = RNGenerator  # To match the name in NumPy
 
 NPGenerator.register(np.random.Generator)
 
