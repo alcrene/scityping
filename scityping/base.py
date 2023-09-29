@@ -15,6 +15,14 @@ from .utils import get_type_key, TypeRegistry
 from .typing import StrictStr, StrictBytes, StrictInt, StrictFloat, StrictBool
 
 try:
+    # v3.10+ allows notation like ``int|str``, which instantiates a `UnionType`.
+    # We treat these as equivalent to `Union[int,str]`
+    from types import UnionType
+except:
+    class UnionType:  # Dummy type, so that `instance(T, UnionType)` doesn’t raise an exception but returns False
+        pass
+
+try:
     from pydantic import BaseModel
 except ModuleNotFoundError:
     # BaseModel is used only for isinstance checks – if pydantic is not loaded,
@@ -668,7 +676,7 @@ def validate_dataclass_field(val, T: type):
     ## Support for generic types ##
 
     # Union
-    if __origin__ is Union:
+    if __origin__ is Union or isinstance(T, UnionType):
         if isinstance(val, tuple(_T for _T in T.__args__
                                  if not (isinstance(_T, BaseGenericAlias)
                                          or (isinstance(_T, type) and issubclass(_T, Generic)))  # Some types inherit from Generic but not _BaseGenericAlias (e.g. 'numpy.typing._array_like._SupportsArray')
