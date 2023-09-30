@@ -11,6 +11,11 @@ from scityping.functions import PureFunction, PartialPureFunction, CompositePure
 
 @PureFunction
 def pure_f(x, n=2):
+    """This is
+
+    a multiline
+    docstring
+    """
     return x/n if x%n else x**n
 
 def f(x, n=2):

@@ -5,6 +5,7 @@ import importlib
 import inspect
 import operator
 import functools
+import re
 from collections.abc import Callable as Callable_
 
 from typing import ClassVar, Union, Type, Callable, List, Tuple, _Final
@@ -610,8 +611,28 @@ def remove_comments(s, on_fail='warn'):
     :param on_fail: Default: 'warn'. Change to 'raise' to raise the error
         instead of simply printing a warning.
     """
+    # # The bit below is based on a more recent answer to the same question: https://stackoverflow.com/a/76593305
+    # # It might be more robust, but since I don’t know ast (and even less astor), I would need to test more thoroughly
+    # try:
+    #     parsed = ast.parse(s)
+    # except Exception as e:
+    #     if on_fail == 'warn':
+    #         warn(f"{str(e)}\n`remove_comments` encountered the error above. "
+    #              "The string was returned unmodified.")
+    #         return s
+    #     else:
+    #         raise e
+    # for node in ast.walk(parsed):
+    #     if isinstance(node, ast.Expr) and isinstance(node.value, ast.Str):
+    #         # set value to empty string
+    #         node.value = ast.Constant(value='') 
+    # formatted_code = ast.unparse(parsed)  
+    # pattern = r'^.*"""""".*$' # remove empty """"""
+    # formatted_code = re.sub(pattern, '', formatted_code, flags=re.MULTILINE) 
+    # return formatted_code
+
     try:
-        lines = ast.unparse(ast.parse(textwrap.dedent(s))).split('\n')
+        src = ast.unparse(ast.parse(textwrap.dedent(s)))
     except Exception as e:
         if on_fail == 'warn':
             warn(f"{str(e)}\n`remove_comments` encountered the error above. "
@@ -619,11 +640,16 @@ def remove_comments(s, on_fail='warn'):
             return s
         else:
             raise e
-    out_lines = []
-    for line in lines:
-        if line.lstrip()[:1] not in ("'", '"'):
-            out_lines.append(line)
-    return '\n'.join(out_lines)
+    # Although this looks different than the quoted answer, the logic is the
+    # same: remove lines which start with '"'
+    # However we also identify multiline docstrings, something the original code missed
+    # Remove multiline strings
+    src = re.sub(r'^\s*"""[\s\S]*?"""[ \t]*\n?', "", src, flags=re.MULTILINE)
+    src = re.sub(r"^\s*'''[\s\S]*?'''[ \t]*\n?", "", src, flags=re.MULTILINE)
+    # Remove single line strings  (must do this after multiline strings !)
+    src = re.sub(r'^\s*".*\n', "", src, flags=re.MULTILINE)
+    src = re.sub(r"^\s*'.*\n", "", src, flags=re.MULTILINE)
+    return src
 
 def serialize_function(f) -> str:
     """
