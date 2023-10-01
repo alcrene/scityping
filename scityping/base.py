@@ -667,11 +667,17 @@ def validate_dataclass_field(val, T: type):
     ## Simplest case: `val` is already of type `T` ##
     # NB: This works even if `T` is not a deserializable type
 
-    if __origin__ is None and isinstance(T, type) and isinstance(val, T):
-        # (Something like Callable[[int],None] is still a type, but would
-        #  raise TypeError in the isinstance (also we want to continue and 
-        #  check the signature). The __origin__ skips generic types.
-        return val
+    # if __origin__ is None and isinstance(T, type) and isinstance(val, T):
+    #     # A generic type like Callable[[int],None] is still a type, but would
+    #     # raise TypeError in the isinstance (also we want to continue and 
+    #     # check the signature). The __origin__ skips generic types.
+    #     return val
+    try:                          # In Python 3.11+, things like typing.Any are
+        if isinstance(val, T):    # now types, but still don’t work with generics.
+            return val            # The most reliable seems to be to catch the
+    except TypeError:             # TypeError, rather than detect
+        pass
+
 
     ## Support for generic types ##
 
@@ -1130,7 +1136,7 @@ class Dataclass(Serializable):
     @dataclass
     class Data:
         type: Type
-        data: Dict[str,Any]  # TODO: Rename 'kwargs'
+        data: Dict[str, Any]  # TODO: Rename 'kwargs'
         def encode(dc: Dataclass) -> Dataclass.Data:
             # NB: dataclasses.asdict would make a recursive deepcopy of dc, which we don't want
             return (type(dc), {f.name: getattr(dc, f.name)
