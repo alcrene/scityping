@@ -377,7 +377,7 @@ class Serializable:
             return targetT.validate(data)  # Unless overriden is targetT, this will use the `matching_dataclasses` branch above
 
         # Branch 5: As a final option, try simply passing the value as argument to this type
-        #           This always on the base Serializer class, since it takes no arguments,
+        #           This always fails on the base Serializer class, since it takes no arguments,
         #           but it allows things like ``PintQuantity.validate(3.)``
         # EDIT: Don't try passing as args, because this can prevent exceptions
         #   from being raised (e.g. an array will accept a heterogeneous list).

@@ -54,6 +54,12 @@ def test_purefunction():
     with pytest.raises(ValidationError):
         Foo(f=f)
 
+    # We also support initializing from a string with the format
+    f3 = PureFunction.validate("x -> x/(1+x)")
+    foo = Foo(f=f3)
+    foo2 = Foo.parse_raw(foo.json())
+    assert all(foo.f(x) == foo2.f(x) for x in [3, 5, 8, 100, 101])
+
 def test_partialpurefunction():
     scityping.config.trust_all_inputs = True
     
@@ -81,6 +87,18 @@ def test_partialpurefunction():
     assert all(foo.f(x) == foo2.f(x) for x in [3, 5, 8, 100, 101])
 
     foo = Foo(f=h)
+    foo2 = Foo.parse_raw(foo.json())
+    assert all(foo.f(x) == foo2.f(x) for x in [3, 5, 8, 100, 101])
+
+    # We also support initializing from a string with the format
+    f3 = PureFunction.validate("x,y -> x/(1+x)")
+    fa = partial(f3, 2)
+    fb = partial(f3, y=2)
+
+    foo = Foo(f=fa)
+    foo2 = Foo.parse_raw(foo.json())
+    assert all(foo.f(x) == foo2.f(x) for x in [3, 5, 8, 100, 101])
+    foo = Foo(f=fb)
     foo2 = Foo.parse_raw(foo.json())
     assert all(foo.f(x) == foo2.f(x) for x in [3, 5, 8, 100, 101])
 
@@ -118,7 +136,8 @@ def test_special_functions():
                np.max,
                partial(np.add, 3),
                partial(np.clip, a_min=-1, a_max=2),
-               partial(operator.pow, 2)
+               partial(operator.pow, 2),
+               "x -> np.tanh(x)"
                ]:
         purefn = PureFunction(fn)
         test_vals = [-10, -0.3, 0, 1, 5]

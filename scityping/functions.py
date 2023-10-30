@@ -218,7 +218,7 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
             try:
                 Partial = cls.__dict__['Partial']
             except KeyError:
-                raise TypeError(f"{func} is a partial functional but '{cls}' "
+                raise TypeError(f"{func} is a partial function but '{cls}' "
                                 "does not define a partial variant.")
             else:
                 return Partial(func)
@@ -228,6 +228,8 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
             # This is our second pass through __init__, probably b/c of __new__redirect
             # assert hasattr(self, '__signature__')
             return
+        if isinstance(func, str):
+            func = deserialize_function(func)
         self.func = func
         # Copy attributes like __name__, __module__, ...
         functools.update_wrapper(self, func)
@@ -258,6 +260,9 @@ class PureFunction(Serializable, metaclass=PureFunctionMeta):
                                 "for example, it does not match `int` to "
                                 "`Union[int,float]`to bypass the check, use "
                                 "`PureFunction` without specifying a signature")
+        # Additional shorthand specification format like: "x,y -> do_something"
+        elif isinstance(value, str):                           # Instead of checking that string looks valid, let `deserialize_function` fail if necessary
+            value = PureFunction(deserialize_function(value))  # This should produce more useful error messages.
         # Continue with the normal validation
         return super().validate(value, field)
     
@@ -787,13 +792,11 @@ def deserialize_function(
         elif "lambda " in s or s.count("->") == 1:
             f = _deserialize_lambda(s, globals, locals)
         else:
-            breakpoint()
             raise ValueError(msg)
         # Store the source with the function, so it can be serialized again
         f.__func_src__ = s_orig
         return f
     else:
-        breakpoint()
         raise ValueError(msg)
 
 def _deserialize_def(s, globals, locals):
@@ -801,7 +804,6 @@ def _deserialize_def(s, globals, locals):
     if not s[:4] == "def ":
         msg = ("Cannot decode serialized function. It should be a string as "
                f"returned by inspect.getsource().\nReceived value:\n{s}")
-        breakpoint()
         raise ValueError(msg)
     fname = s[4:s.index('(')].strip() # Remove 'def', anything after the first '(', and then any extra whitespace
     s = "\n".join(chain(decorator_lines, [s]))
