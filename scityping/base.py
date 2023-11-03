@@ -586,6 +586,10 @@ try:
     from typing import _BaseGenericAlias as BaseGenericAlias
 except ImportError:
     from typing import _GenericAlias as BaseGenericAlias  # Python ⩽ 3.8
+try:
+    from typing import _SpecialForm
+except ImportError:  # Python ⩽ 3.7
+    class _SpecialForm: pass
 
 # The `Dataclass` type is special cased: it is identified with `is_dataclass`
 # rather than with `isinstance`, so we don't need to register a base class.
@@ -684,12 +688,13 @@ def validate_dataclass_field(val, T: type):
     # Union
     if __origin__ is Union or isinstance(T, UnionType):
         if isinstance(val, tuple(_T for _T in T.__args__
-                                 if not (isinstance(_T, BaseGenericAlias)
+                                 if not (isinstance(_T, (BaseGenericAlias, _SpecialForm))
                                          or (isinstance(_T, type) and issubclass(_T, Generic)))  # Some types inherit from Generic but not _BaseGenericAlias (e.g. 'numpy.typing._array_like._SupportsArray')
                                  )):
             # Similar to smart_union: if value is already an instance of any type, don’t change it
             # CAVEAT: Using `isinstance` with generic types like `List[int]` raises TypeError, so we need to remove them from the check.
             #         Consequently this does not work if `val` should match a generic type: then we just do the normal left-to-right coercion. 
+            #         `isinstance` also doesn't work with subclasses of _SpecialForm: Any, NoReturn, ClassVar, Union, Optional
             return val
         else:
             # Try coercing, going left to right in the types
