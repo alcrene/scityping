@@ -77,7 +77,7 @@ This package is my [fifth](https://github.com/mackelab/mackelab-toolbox/blob/acc
 - It must be possible to associate a pair of serialization/deserialization routines to a type.
 - These routines must be recognized by [Pydantic](https://pydantic-docs.helpmanual.io/), since this is the serialization library I currently use.
 - It should be possible for imported librairies to use custom serializers, without worrying about the order of imports. Note that this is difficult with vanilla Pydantic, because the list of `json_encoders` is set when the class is defined. One can [work around](https://github.com/samuelcolvin/pydantic/issues/951#issuecomment-774297368) this by defining a global dictionary of JSON encoders, but the behaviour is still dependent on the order of imports, and is thus fragile.
-- It should be possible to associate custom serializers to already existing types. (E.g. a serializer for `complex`.)
+- It should be possible to associate custom serializers to already existing types. (E.g. add a serializer for `complex`.)
 - It should be possible to use generic base classes in a model definition, while subclasses are preserved after deserialization. For example, in the snippet below this is *not* the case:
   ```python
   class Signal:
@@ -93,7 +93,7 @@ This package is my [fifth](https://github.com/mackelab/mackelab-toolbox/blob/acc
   sig = AMSignal(...)
   model = MyModel(signal=sig)
   type(model.signal)   # AMSignal
-  model2 = MyModel.parse_raw(model.json)
+  model2 = MyModel.parse_raw(model.json())
   type(model2.signal)  # Signal -> Serialization round trip does not preserve type.
   ```
   Since it is often the cases that the same computational pipeline can be applied to many different types, the ability to define classes in terms of only generic base types is extremely useful.
@@ -123,8 +123,8 @@ class Signal(Serializable):
     freq  : float
 
     @staticmethod
-    def encode(signal: "Signal"):  # The `encode` method is required
-      return (signal.values, signal.times, signal.freq)
+    def encode(signal: "Signal"):  # The `encode` method defines how to extract values
+      return (signal.values, signal.times, signal.freq)   # for the fields in `Data`
 
   def __init__(values, times, freq):
     ...
@@ -143,9 +143,11 @@ class Recorder(BaseModel):
 ```
 
 Moreover, *subclasses* of `Signal` can also be used and will be recognized correctly.
+They only need to define their own `Data` container (which may reuse the one from the base class, as we do below).
 ```python
 class AMSignal(Signal):
-  pass
+  class Data(Signal.Data):
+    pass
 
 signal = Signal(...)
 amsignal = AMSignal(...)
@@ -157,7 +159,7 @@ assert type(rec2.signals[1]) is AMSignal  # Also succeeds
 ```
 (With standard Pydantic types, in the example above, values would all be coerced to the `Signal` type after deserialization.)
 
-The default decoder will pass the attributes of the `Data` object to the class’ `__init__` method. For cases where this is unsatisfactory, one can define a custom `decode` method. The example below uses this to return a true `range` object, rather than the `Range` wrapper:
+The default decoder will pass the attributes of the `Data` object to the class’ `__init__` method as keyword arguments. For cases where this is unsatisfactory, one can define a custom `decode` method. The example below uses this to return a true `range` object, rather than the `Range` wrapper:
 ```python
 class Range(Serializable, range):
   @dataclass
@@ -170,7 +172,7 @@ class Range(Serializable, range):
 ```
 Note that while the `decode` mechanism can help solve corner cases, in many situations the benefits are cosmetic.
 
-Finally, extending an *existing* type with a serializer is just a matter of defining a subclass. For example, the provided `Complex` type is implemented as follows:
+Finally, extending an *existing* type with a serializer is just a matter of defining a subclass. For example, the `Complex` type provided by `scityping` is implemented as follows:
 ```python
 class Complex(Serializable, complex):
   @dataclass
@@ -181,7 +183,7 @@ class Complex(Serializable, complex):
     def decode(data): return complex(data.real, data.imag)
 ```
 (When the subclass uses the *same name* (case-insensitive), a bit of magic is applied to associate it to the base type. Otherwise an extra `Complex.register(complex)` is needed.)
-It can then be used to allow serializing all complex numbers (not just instance of `Complex`):
+It can then be used to allow serializing all complex numbers (not just instance of `Complex`:
 ```python
 class Foo(BaseModel):
   z: Complex
@@ -192,7 +194,7 @@ Foo(z=3+4j).json()
 ```
 Note that this works even if `Complex` is defined after `Foo`, without any patching of `Foo`’s list of `__json_encoders__`.[^post-type-def]
 
-**Hint** It is recommended that the nested `Data` provide type-aware deserialization logic. The easiest way to do this is to use either `scityping.pydantic.BaseModel` or `scityping.pydantic.dataclass`. We do add basic deserialization support for the builtin `dataclasses.dataclass`, but this is intentionally limited to a few basic types (`int`, `float`, `str`) and `Serializable` subclasses. If your data are very simple, this may be sufficient – see the docstring `scityping.Dataclass` for what exactly is supported.
+**Hint** It is recommended that the nested `Data` provide type-aware deserialization logic. The easiest way to do this is to use either `scityping.pydantic.BaseModel` or `scityping.pydantic.dataclass`. We do add basic deserialization support for the builtin `dataclasses.dataclass`, but this is intentionally limited to a few basic types (`int`, `float`, `str`) and `Serializable` subclasses. If your data are very simple, this may be sufficient – see the docstring of `scityping.Dataclass` for what exactly is supported.
 
 [^post-type-def]: The corollary of this is that it makes it easier for modules to arbitrarily modify how types are serialized by *already imported* modules. Thus by adding a new serializer, a new package may break a previously working one. Also, while the hooks for extending type suport don't increase the attack surface vis-à-vis a malicious actor (imported Python modules are already allowed to inject code wherever they please), they might make things easier for them.
 
@@ -202,7 +204,7 @@ Note that this works even if `Complex` is defined after `Foo`, without any patch
 
 For types serialized with Pydantic, this adds a single `isinstance` check for each serialization call, which should be negligeable.[^negligeable-comp-cost]
 
-Serialization with `Serializable` is not as aggressively tested with regards to performance and may be a bit slower.
+Serialization with `Serializable` is not as aggressively tested with regards to performance and is expected to be a slower.
 
 *De*serialization of `Serializable` types in general will be slower, although this should only be noticeable if deserialization is a big part of your application. In some cases it may even be faster: Pydantic fields with `Union` types execute a try-catch for each possible type, keeping the first successful result. Since `Serializable` includes the target type in serialized data, the correct data type is generally attempted first.
 
