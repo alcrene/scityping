@@ -190,8 +190,11 @@ class Serializable:
         raise NotImplementedError
 
     def __init_subclass__(cls):
+        Data_is_from_parent = any(cls.Data is getattr(C, "Data", None) for C in type.mro(cls)[1:])
+
         ## Create a default Data container if a) it is missing, and b) it is possible ##
-        if cls.Data is Serializable.Data:
+        if Data_is_from_parent and cls.Data is not Dataclass.Data:  # Dataclass is a type we use for Data containers; it has special support to allow being used as a Data type
+
             if isinstance(cls, BaseModel):
                 # `cls` is already a Pydantic BaseModel, so it can be its own container
                 # => We still need an `encode` method, but it doesn’t need to do anything
@@ -199,21 +202,48 @@ class Serializable:
                 Data = cls
                 if not hasattr(Data, "encode"):    # Monkey patch an `encode` function since we can’t subclass
                     Data.encode = lambda obj: obj  # If the user defined their own `encode`, we assume they know what they are doing
+
             elif getattr(cls, "__annotations__", False):
                 # `cls` has class annotations: We presume these are the fields needed for serialization
                 # Presumably `cls` was decorated with @dataclass, but we don’t know or need this:
                 # we just create `cls.Data` as a new dataclass with those fields
-                annotations = cls.__annotations__  # Store the current value of annotations (Other code could change cls.__annotations__ later)
-                @plain_or_pydantic_dataclass
-                class Data:
-                    __annotations__ = annotations
-                    @staticmethod  # We use the class method, so it doesn’t make sense to have `self`
-                    def encode(obj:cls): 
-                        return cls.Data(**{attr:getattr(obj, attr) for attr in annotations})
+
+                # We need to take care: if we inherit from a type which already defines a Data
+                # container, the fields need to be combined.
+
+                if isinstance(cls.Data, BaseModel):
+                    class Data(cls.Data):
+                        __annotations__ = cls.__annotations__
+                        @classmethod
+                        def encode(datacls, obj:cls):
+                            return datacls(**{attr:getattr(obj, attr) for attr in datacls.__fields__})
+
+                elif is_dataclass(cls.Data):
+                    # Keep the order of fields
+                    all_fields = [f.name for f in fields(cls.Data)]
+                    all_fields += [name for name in cls.__annotations__.keys() if name not in all_fields]
+                    @plain_or_pydantic_dataclass
+                    class Data(cls.Data):
+                        __annotations__ = cls.__annotations__
+                        @classmethod
+                        def encode(datacls, obj:cls): 
+                            return datacls(**{attr:getattr(obj, attr) for attr in all_fields})
+
+                elif cls.Data is Serializable.Data:
+                    # The base is not useful: Create a new one with only the current annotations as fields
+                    @plain_or_pydantic_dataclass
+                    class Data:
+                        __annotations__ = cls.__annotations__
+                        @classmethod  # We use the class method, so it doesn’t make sense to have `self`
+                        def encode(datacls, obj:cls): 
+                            return datacls(**{attr:getattr(obj, attr) for attr in datacls.__annotations__})
+
             else:
                 Data = None
+
             if Data is not None:
                 cls.Data = Data
+                Data_is_from_parent = False
             
         ## Reproduce ABC functionality, since we don't subclass ABC ##
         if not inspect.isabstract(cls):
@@ -222,8 +252,7 @@ class Serializable:
                                 "undefined `Data`.")
             # Ensure that all subclasses define their own `Data` class
             # (Simply inheriting Data from the parent class makes deserialization ambiguous.)
-            if (any(cls.Data is getattr(C, "Data", None) for C in type.mro(cls)[1:])
-                and not issubclass(cls, Dataclass)):  # Dataclass has special support to allow it to be used as the type for Data without causing infinite recursion
+            if (Data_is_from_parent and not issubclass(cls, Dataclass)):  # Dataclass has special support to allow it to be used as the type for Data without causing infinite recursion
                 raise TypeError(f"The `Serializable` type {cls.__qualname__} must "
                                 "define its own `Data` class.")
             # Check that 'encode' is a classmethod (https://stackoverflow.com/a/19228282)
