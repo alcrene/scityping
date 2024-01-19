@@ -287,7 +287,7 @@ class Serializable:
             # Consider the case here where we define a plain Dataset in `base`, then
             # define `C = Dataset(base.Dataset, torch...Dataset). We want to
             # register the `torch...Dataset` with C. (Any parent which
-            # (is Serializable will already have been registered above.)
+            # is Serializable will already have been registered above.)
         except StopIteration:
             pass
         else:
@@ -499,14 +499,14 @@ class Serializable:
                 break
         else:
             # I'm not sure what the most appropriate error type should be, but at least TypeError is consistent with the similar error in `validate()`
-            # Also `KeyError` is special and doesn't display newlines; I think it is best reserved for cases where the user interacts directly with a mapping
+            # Also `KeyError` is special and doesn't display newlines; it is best reserved for cases where the user interacts directly with a mapping
             raise TypeError("There seems to be no encoder registered for any "
                            f"of the types {type.mro(type(value))}. Note that types "
                            "depending on external librairies (like scipy or torch) "
                            "are only registered when the corresponding module in "
                            "scityping is imported.\n"
                            f"Attempted to serialize using: {cls}.reduce\n"
-                           f"Registered types for this class: {cls._registry.keys()}")
+                           f"This serializes knows how to serialize the following types: {cls._registry.keys()}")
 
         # Call Data.encode, passing any parameters from kwargs that match a parameter in Data.encode.
         if kwargs:

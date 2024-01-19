@@ -37,7 +37,8 @@ dynamic = ["version"]
 docs = ["sphinx", "myst-parser", "sphinx-book-theme", "sphinxcontrib-mermaid",
         "numpy", "scipy", "torch", "pint", "quantities"]
 test = ["coverage", "pytest",
-        "numpy", "scipy", "blosc", "torch", "pint", "quantities"]
+        "numpy", "scipy", "xarray", "torch",
+        "blosc", "pint", "quantities"]
 
 [project.urls]
 "Documentation" = "https://scityping.readthedocs.io/"

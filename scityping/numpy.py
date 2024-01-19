@@ -294,7 +294,7 @@ for type_name in ('int8', 'int16', 'int32', 'int64',
 # Arrays are serialized in two different ways, based on whether it is worth
 # compressing them vs simply storing them as a string.
 
-# TODO: Expose an interface for configuring compressors/decompressors
+# TODO: Expose a config option for configuring compressors/decompressors
 # TODO: Allow different serialization methods:
 #       - str(A.tolist())
 #       - base64(blosc) (with configurable keywords for blosc)
@@ -324,6 +324,8 @@ class ListArrayData(SerializedData):
     def decode(data):
         return np.array(data.data, dtype=data.dtype)
 
+# TODO: Use config object to pass compression options
+
 # Longer arrays are compressed and converted to base85 encoding, with a short summary
 # Arrays of size 100 are around the break-even point for 64-bit floats, blosc, base85
 _EncoderType = Literal[tuple(encoders)]         # Workaround because the ability
@@ -352,8 +354,10 @@ class CompressedArrayData(SerializedData):      #   deferred types is limited
                     compression = comp  # Value of `compression` is stored with the data
                     break
             else:
-                raise ModuleNotFoundError("None of the specified compressors "
-                                          f"were found: {compression}.")
+                raise ModuleNotFoundError(
+                    f"None of the specified compressors were found: {compression}.\n"
+                    "Note that the relevant modules need to be imported somewhere "
+                    "in your code in order to be available.")
         else:
             compressor = compressors[compression]
         encoder = encoders[encoding]
@@ -532,10 +536,15 @@ class Array(_ArrayType, metaclass=_ArrayMeta):
     - `Array[T,n]` specifies an array with dtype `T`, that must have exactly
       `n` dimensions.
 
+    .. important:: Arrays are stored using compression, but the relevant module
+       will only be used if it was already imported.
+       (This is to avoid silently importing modules during execution.)
+
     Example
     -------
     >>> from pydantic.dataclasses import dataclass
     >>> from scityping import Array
+    >>> import blosc  # Required to store arrays with blosc compression
     >>>
     >>> @dataclass
     >>> class Model:
