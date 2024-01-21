@@ -336,7 +336,7 @@ class CompressedArrayData(SerializedData):      #   deferred types is limited
     summary: str
     data: bytes
     @classmethod
-    def encode(cls, array, compression: Union[str,Tuple[str,...]]=("blosc",),
+    def encode(cls, array, compression: Union[str,Tuple[str,...]]=("blosc", "zlib",),
                encoding="b85", threshold: int=100):
         """
         :param:compression:
@@ -544,7 +544,7 @@ class Array(_ArrayType, metaclass=_ArrayMeta):
     -------
     >>> from pydantic.dataclasses import dataclass
     >>> from scityping import Array
-    >>> import blosc  # Required to store arrays with blosc compression
+    >>> import blosc  # Without this, Array would fall back to zlib for compression
     >>>
     >>> @dataclass
     >>> class Model:

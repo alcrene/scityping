@@ -20,7 +20,7 @@ class DataArray(Serializable, xr.DataArray):
         data: bytes
         @classmethod
         def encode(cls, dataarray,
-                   compression: Union[str,Tuple[str,...]]=("blosc",),
+                   compression: Union[str,Tuple[str,...]]=("blosc","zlib"),
                    encoding="b85"):
             # Parse arguments
             if compression is None:
