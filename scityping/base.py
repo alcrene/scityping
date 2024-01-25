@@ -203,10 +203,14 @@ class Serializable:
                 if not hasattr(Data, "encode"):    # Monkey patch an `encode` function since we can’t subclass
                     Data.encode = lambda obj: obj  # If the user defined their own `encode`, we assume they know what they are doing
 
-            elif getattr(cls, "__annotations__", False):
+            elif getattr(cls, "__annotations__", False) or cls.Data is not Serializable.Data:
                 # `cls` has class annotations: We presume these are the fields needed for serialization
                 # Presumably `cls` was decorated with @dataclass, but we don’t know or need this:
                 # we just create `cls.Data` as a new dataclass with those fields
+                # ALTERNATIVE: We subclassed a Serializable type which already has a Data container.
+                #    In this case, we even allow the annotations to be empty: If the annotatons are
+                #    empty, most likely the subclass was created to change or add methods, but the
+                #    attributes required to serialize are the same.
 
                 # We need to take care: if we inherit from a type which already defines a Data
                 # container, the fields need to be combined.
