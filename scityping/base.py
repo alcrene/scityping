@@ -215,9 +215,10 @@ class Serializable:
                 # We need to take care: if we inherit from a type which already defines a Data
                 # container, the fields need to be combined.
 
+                annotations = {nm: T for nm, T in cls.__annotations__.items() if "ClassVar" not in str(T)}
                 if isinstance(cls.Data, BaseModel):
                     class Data(cls.Data):
-                        __annotations__ = cls.__annotations__
+                        __annotations__ = annotations
                         @classmethod
                         def encode(datacls, obj:cls):
                             return datacls(**{attr:getattr(obj, attr) for attr in datacls.__fields__})
@@ -225,10 +226,10 @@ class Serializable:
                 elif is_dataclass(cls.Data):
                     # Keep the order of fields
                     all_fields = [f.name for f in fields(cls.Data)]
-                    all_fields += [name for name in cls.__annotations__.keys() if name not in all_fields]
+                    all_fields += [name for name in annotations if name not in all_fields]
                     @plain_or_pydantic_dataclass
                     class Data(cls.Data):
-                        __annotations__ = cls.__annotations__
+                        __annotations__ = annotations
                         @classmethod
                         def encode(datacls, obj:cls): 
                             return datacls(**{attr:getattr(obj, attr) for attr in all_fields})
@@ -237,8 +238,8 @@ class Serializable:
                     # The base is not useful: Create a new one with only the current annotations as fields
                     @plain_or_pydantic_dataclass
                     class Data:
-                        __annotations__ = cls.__annotations__
-                        @classmethod  # We use the class method, so it doesn’t make sense to have `self`
+                        __annotations__ = annotations
+                        @classmethod  # We use the class to access the method
                         def encode(datacls, obj:cls): 
                             return datacls(**{attr:getattr(obj, attr) for attr in datacls.__annotations__})
 
