@@ -769,30 +769,41 @@ def validate_dataclass_field(val, T: type):
 
     # Union
     if __origin__ is Union or isinstance(T, UnionType):
-        if isinstance(val, tuple(_T for _T in T.__args__
-                                 if not (isinstance(_T, (BaseGenericAlias, _SpecialForm))
-                                         or (isinstance(_T, type) and issubclass(_T, Generic)))  # Some types inherit from Generic but not _BaseGenericAlias (e.g. 'numpy.typing._array_like._SupportsArray')
-                                 )):
-            # Similar to smart_union: if value is already an instance of any type, don’t change it
-            # CAVEAT: Using `isinstance` with generic types like `List[int]` raises TypeError, so we need to remove them from the check.
-            #         Consequently this does not work if `val` should match a generic type: then we just do the normal left-to-right coercion. 
-            #         `isinstance` also doesn't work with subclasses of _SpecialForm: Any, NoReturn, ClassVar, Union, Optional
-            return val
+        # Short-circuit branch: if value matches any of the types in the Union, return it unchanged
+        try:
+            if isinstance(val, tuple(_T for _T in T.__args__
+                                     if not (isinstance(_T, (BaseGenericAlias, _SpecialForm))
+                                             or (isinstance(_T, type) and issubclass(_T, Generic)))  # Some types inherit from Generic but not _BaseGenericAlias (e.g. 'numpy.typing._array_like._SupportsArray')
+                                     )):
+                # Similar to smart_union: if value is already an instance of any type, don’t change it
+                # CAVEAT: Using `isinstance` with generic types like `List[int]` raises TypeError, so we need to remove them from the check.
+                #         Consequently this does not work if `val` should match a generic type: then we just do the normal left-to-right coercion. 
+                #         `isinstance` also doesn't work with subclasses of _SpecialForm: Any, NoReturn, ClassVar, Union, Optional
+                return val
+        except TypeError:    # Nested generics would still raise a TypeError, like above
+            logger.warning(  # For those we don’t support any short-circuiting: just left-to-right coercion
+                "scityping.Dataclass is meant for dataclasses with simple types; "
+                f"the union type '{T}' might be complex than what we expect to support. "
+                "We will continue, trying each subtype left-to-right, but you may "
+                "have more success using a class with more powerful type logic, "
+                "like `BaseModel` or `dataclass` found in `scityping.pydantic`.")
+
+
+        # Main branch: Try coercing, going left to right in the types
+        err_msgs = []
+        for subT in T.__args__:
+            try:
+                return validate_dataclass_field(val, subT)
+            except TypeError as e:
+                err_msgs.append(str(e))
         else:
-            # Try coercing, going left to right in the types
-            err_msgs = []
-            for subT in T.__args__:
-                try:
-                    return validate_dataclass_field(val, subT)
-                except TypeError as e:
-                    err_msgs.append(str(e))
-            else:
-                # None of the types succeeded in deserializing: raise error, with all concatenated messages
-                err_str = "\n".join(f"{subT} - {msg}"
-                                    for subT, msg in zip(T.__args__, err_msgs))
-                err_str = textwrap.indent(err_str, "  ")
-                raise TypeError(f"Unable to validate to {T}. "
-                                f"Error messages were:\n{err_str}")
+            # None of the types succeeded in deserializing: raise error, with all concatenated messages
+            err_str = "\n".join(f"{subT} - {msg}"
+                                for subT, msg in zip(T.__args__, err_msgs))
+            err_str = textwrap.indent(err_str, "  ")
+            raise TypeError(f"Unable to validate to {T}. "
+                            f"Error messages were:\n{err_str}")
+
     # List, Set, Frozenset
     elif __origin__ in (list, set, frozenset):
         assert len(T.__args__) == 1, \
