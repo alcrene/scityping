@@ -10,9 +10,12 @@ from .numpy import (encoders, decoders, compressors, decompressors,
 #       The only line which differs between the two is the last line of `decode`.
 # TODO: Allow writing to a separate file (how to manage separate output files needs to be decided at the project level)
 #       Using `.to_netcdf()` without args to return a bytes object only works with scipy, and therefore only with the NetCDF3 format.
+# TODO: Use a proxy file object (like we do with NumPy arrays) so that we can use NetCDF4 instead of NetCDF4.
 
 # NB: xarray objects already provide a serializer `.to_netcdf()` which converts everything to a bytes sequence.
 #     So all we need to do is wrap this with a compressor and encoder, same as we do for NumPy arrays
+#     HOWEVER, when writing to bytes, xarray falls back to the 'scipy' engine, which only implements NetCDF3.
+#     This means that certain types like uint are not supported.
 
 # TODO: Implement fallback to plaintext, for small DataArray (analogous to numpy.ListArrayData)
 class DataArray(Serializable, xr.DataArray):

@@ -212,14 +212,23 @@ class _NPValueType(Serializable, np.generic):
             else:
                 raise ValueError(f"Field {field.name} expects a scalar, not "
                                  f"an array.\nProvided value: {value}.")
+
+        # If necessary, deserialize the value
+        if ( isinstance(value, list)
+             and len(value) == 2
+             and value[0].endswith("_NPValueType") ):
+            value = value[1]["data"]
+
         # Don't cast unless necessary
         # np.issubdtype allows specifying abstract dtypes like 'number', 'floating'
         # np.generic ensures isubdtype doesn't let through non-numpy types
+        # np.can_cast doesn’t allow strings as the first argument (NumPy strings are fine)
         # (like 'float'), or objects which wrap numpy types (like 'ndarray').
         if (isinstance(value, np.generic)
             and np.issubdtype(type(value), cls.nptype)):
             return value
-        elif (np.can_cast(value, cls.nptype)
+        elif (isinstance(value, str)
+              or np.can_cast(value, cls.nptype)
               or np.issubdtype(getattr(value, 'dtype', np.dtype('O')), np.dtype(str))):
             # Exception for strings, as stated above
             nptype = infer_numpy_type_to_cast(cls.nptype, value)

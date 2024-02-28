@@ -107,6 +107,13 @@ def test_numpy(caplog):
                 x += y*dt; y+=γ*x
             return x.sum()
 
+    class Model5(BaseModel):
+        a: NPValue[str]
+        b: NPValue[np.uint8]
+        c: NPValue['uint32']
+        d: NPValue[np.complex128]
+        e: NPValue[bool]
+
     # Basic type conversion
     w64 = np.array([0.25, 0.75], dtype='float64')
     w32 = w64.astype('float32')
@@ -120,6 +127,11 @@ def test_numpy(caplog):
     # Test conversion from ints and list
     m2_nplist = Model2(a=-0.5, b=np.float32(-0.1), w=[np.float32(0.25), np.float32(0.75)], dt=0.01)
     assert m2_nplist.w.dtype is np.dtype('float32')
+
+    # Test round-trip to a JSON
+    m5_a = Model5(a=1, b=1, c=1, d=1, e=True)
+    m5_b = Model5.parse_raw(m5_a.json())
+    assert str(m5_b) == str(m5_a)
 
     # Test computed fields and numpy type conversions
     m3 = Model3(a=.25, dt=0.02)
