@@ -1243,6 +1243,10 @@ class Dataclass(Serializable):
                 # This is necessary with the default decoder, since such fields
                 # cannot be given to the __init__ function.
         def decode(data: Dataclass.Data) -> Dataclass:
-            obj = data.type(**data.data)
-            obj = validate_dataclass(obj, inplace=True)
-            return obj
+            if hasattr(data.type, "__validate__"):
+                # If we have a Pydantic dataclass, use its more sophisticated validation
+                return data.type.__validate__(data.data)
+            else:
+                obj = data.type(**data.data)
+                obj = validate_dataclass(obj, inplace=True)
+                return obj
