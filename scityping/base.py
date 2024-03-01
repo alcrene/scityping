@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import contextlib
 import logging
 import textwrap
 import inspect
@@ -10,7 +11,9 @@ from collections.abc import (
     Callable as Callable_, Sequence as Sequence_, Iterable as Iterable_,
     Mapping as Mapping_)
 from dataclasses import fields, is_dataclass, MISSING
+from pathlib import Path
 from types import FunctionType
+from .config import config
 from .utils import get_type_key, TypeRegistry
 from .typing import StrictStr, StrictBytes, StrictInt, StrictFloat, StrictBool
 
@@ -39,7 +42,44 @@ logger = logging.getLogger(__name__)
 class MISSING:  # Sentinel value when looking for a value in the namespace
     pass
 
-__all__ = ["json_like", "Serializable", "Serialized", "Dataclass"]
+__all__ = ["context", "json_like", "Serializable", "Serialized", "Dataclass"]
+
+@contextlib.contextmanager
+def context(include_summaries: Union[bool,MISSING]=MISSING,
+            annex_directory: Union[Path,str,MISSING]=MISSING):
+    """Temporarily change values in `scityping.config`
+
+    Allows to set the values of
+
+    - include_summaries
+    - annex_directory
+
+    If `annex_directory` is set, then when entering the context, the value of
+    `config.annex_directory` is set to `dirpath` and the list of annex files
+    (`config.annex_files`) is cleared. On exiting the context, both
+    `config.annex_directory` and `config.annex_files` are reset to their value
+    before entering the context.
+
+    .. Note:: Since `annex_files` is reset upon exiting the context, the list
+       of annex files created within the context needs to be retrieved before
+       exiting.
+    """
+    if include_summaries is not MISSING:
+        old_include_summaries = config.include_summaries
+        config.include_summaries = include_summaries
+    if annex_directory is not MISSING:
+        old_annex_directory = config.annex_directory
+        old_annex_files = config.annex_files  # This creates a copy of the underlying list
+        config.annex_directory = Path(annex_directory)
+        config._annex_files.clear()
+    try:
+        yield None
+    finally:
+        if include_summaries is not MISSING:
+            config.include_summaries = old_include_summaries
+        if annex_directory is not MISSING:
+            config.annex_directory = old_annex_directory
+            config._annex_files[:] = old_annex_files
 
 # ##############
 # Custom JSON objects
@@ -203,7 +243,7 @@ class Serializable:
                 if not hasattr(Data, "encode"):    # Monkey patch an `encode` function since we can’t subclass
                     Data.encode = lambda obj: obj  # If the user defined their own `encode`, we assume they know what they are doing
 
-            elif getattr(cls, "__annotations__", False) or cls.Data is not Serializable.Data:
+            elif hasattr(cls, "__annotations__") or cls.Data is not Serializable.Data:
                 # `cls` has class annotations: We presume these are the fields needed for serialization
                 # Presumably `cls` was decorated with @dataclass, but we don’t know or need this:
                 # we just create `cls.Data` as a new dataclass with those fields
@@ -216,12 +256,25 @@ class Serializable:
                 # container, the fields need to be combined.
 
                 annotations = {nm: T for nm, T in cls.__annotations__.items() if "ClassVar" not in str(T)}
+                err_msg = ("Failed to reconstruct the serialization Data container. "
+                           "This occurred in Data class which was constructed "
+                           f"automatically based on the annotations in {cls.__qualname__}. "
+                           "Automatic construction is a convenience for simple cases; "
+                           "for more complex types writing your own Data container "
+                           "is recommended.\n"
+                           "Automatically Data expected these fields:\n{expected_fields}\n"
+                           "which we tried to retrieve from this object:\n{obj}.")
                 if isinstance(cls.Data, BaseModel):
                     class Data(cls.Data):
                         __annotations__ = annotations
                         @classmethod
                         def encode(datacls, obj:cls):
-                            return datacls(**{attr:getattr(obj, attr) for attr in datacls.__fields__})
+                            try:
+                                return datacls(**{attr:getattr(obj, attr) for attr in datacls.__fields__})
+                            except Exception as e:
+                                raise RuntimeError(err_msg.format(expected_fields=list(datacls.__fields__),
+                                                                  obj=obj))
+
 
                 elif is_dataclass(cls.Data):
                     # Keep the order of fields
@@ -232,7 +285,11 @@ class Serializable:
                         __annotations__ = annotations
                         @classmethod
                         def encode(datacls, obj:cls): 
-                            return datacls(**{attr:getattr(obj, attr) for attr in all_fields})
+                            try:
+                                return datacls(**{attr:getattr(obj, attr) for attr in all_fields})
+                            except Exception as e:
+                                raise RuntimeError(err_msg.format(expected_fields=all_fields,
+                                                                  obj=obj))
 
                 elif cls.Data is Serializable.Data:
                     # The base is not useful: Create a new one with only the current annotations as fields
@@ -241,7 +298,11 @@ class Serializable:
                         __annotations__ = annotations
                         @classmethod  # We use the class to access the method
                         def encode(datacls, obj:cls): 
-                            return datacls(**{attr:getattr(obj, attr) for attr in datacls.__annotations__})
+                            try:
+                                return datacls(**{attr:getattr(obj, attr) for attr in datacls.__annotations__})
+                            except Exception as e:
+                                raise RuntimeError(err_msg.format(expected_fields=list(datacls.__annotations__),
+                                                                  obj=obj))
 
             else:
                 Data = None
@@ -355,13 +416,16 @@ class Serializable:
                 raise NotImplementedError(
                     "Diamond inheritance between Serializable subclasses is not yet "
                     f"supported.\nType {type(value)} subclasses {matching_basesubclasses}.")
+            # Recast value to be of type 'cls'
+            subcls = next(iter(matching_basesubclasses))
+            if hasattr(subcls, "__scityping_from_base_type__"):
+                # If available, use special-purpose function for converting from base to subclass
+                # This is used eg. by the xarray subclasses, whose’s `encode` needs to write to disk.
+                return subcls.__scityping_from_base_type__(value)
             else:
-                # Recast value to be of type 'cls'
-                subcls = next(iter(matching_basesubclasses))
-                if "generator" in str(value).lower():
-                    json = subcls.reduce(value)
-                    subcls.validate(json)
-                return subcls.validate(subcls.reduce(value))  # NB: reduce() doesn’t do the actual conversion to string, so this isn’t too expensive
+                # Otherwise, use a reduce -> validate loop
+                # Note that generally reduce() doesn’t do the conversion string, so they added overhead is usually acceptable
+                return subcls.validate(subcls.reduce(value))
 
         # Branch 3: Check if `value` is an instantiated `Data` object.
         #           If so, construct the target type from it.

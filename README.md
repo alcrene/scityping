@@ -214,6 +214,8 @@ In general, within scientific applications these performance considerations shou
 
 ## Running tests
 
+The tests for xarray objects test functionality to right annex files using the NetCDF4 format, which requires Python 3.11. (Because we use `hashlib.file_digest` to compute a unique filename.) These tests will only succeed with Python 3.11 or higher. Xarray objects can still be used with lower versions of Python, but then will only export to the NetCDF3 format.
+
 To avoid unnecessarily downloading the massive CUDA dependencies just to run the PyTorch tests, consider installing the test dependencies with the following:
 
     pip install --index-url https://download.pytorch.org/whl/cpu torch

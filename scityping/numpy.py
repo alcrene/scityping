@@ -14,6 +14,7 @@ from functools import lru_cache
 
 from .base import json_like, Serializable, ABCSerializable, validate_dataclass
 from .base_types import SerializedData
+from .config import config
 from .utils import LazyDict, get_type_key
 
 try:
@@ -308,7 +309,7 @@ for type_name in ('int8', 'int16', 'int32', 'int64',
 #       - str(A.tolist())
 #       - base64(blosc) (with configurable keywords for blosc)
 #       - base64(zlib)
-#       - external file
+#       - external file => use scityping.annex_directory. See xarray.py
 
 encoders = {"b85": base64.b85encode}
 decoders = {"b85": base64.b85decode}
@@ -378,7 +379,7 @@ class CompressedArrayData(SerializedData):      #   deferred types is limited
         array_encoded = encoder(compressor(v_bytes))
         # Set print threshold to ensure str returns a summary
         with np.printoptions(threshold=threshold):
-            array_sum = str(array)
+            array_sum = str(array) if config.include_summaries else ""
         return cls(encoding, compression, array_sum, array_encoded)
     def decode(data):
         decoder = decoders[data.encoding]
