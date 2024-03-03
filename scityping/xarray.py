@@ -59,7 +59,13 @@ class _AnnexData(SerializedData):
 
     @classmethod
     def decode(cls, data):
-        return cls.loader(config.annex_directory/cls.get_annex_name(data.digest))
+        annex_file = cls.get_annex_name(data.digest)
+        if config.annex_directory is None:
+            raise FileNotFoundError("Attempted to load a {cls.clsname} file with "
+                "an annex, but no annex directory is set. Please set "
+                "`config.annex_directory` to the directory containing the "
+                f"file '{annex_file}'.")
+        return cls.loader(config.annex_directory/annex_file)
 
     @classmethod
     def get_annex_name(cls, digest: str) -> str:
