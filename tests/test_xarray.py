@@ -34,8 +34,13 @@ def test_dataarray(dtype, tmp_path):
 
     np.random.seed(333)
     da = xr.DataArray(data, coords={"x": np.arange(10, dtype='int32')})  # xarray automatically compacts the coords dtype to 'int32' when it serializes
+    da.name = "My data array"
+    da.attrs = {"My attr": 3}
     da2 = Serializable.validate(Serializable.reduce(da))
     assert repr(da) == repr(da2)  # Check that they match exactly, including dtype
+
+    # Ensure that short-circuit path using __scityping_from_base_type_ doesn’t drop attributes
+    assert repr(da) == repr(Serializable.validate(da))
 
     class Model(BaseModel):
         da: DataArray
@@ -92,9 +97,13 @@ def test_dataset(dtype, tmp_path):
                                       "z": 0.5*np.arange(2, dtype='int32')}
                                ),
     })
+    ds.attrs = {"My attr": 3}
 
     ds2 = Serializable.validate(Serializable.reduce(ds))
     assert repr(ds) == repr(ds2)  # Check that they match exactly, including dtype
+
+    # Ensure that short-circuit path using __scityping_from_base_type_ doesn’t drop attrs
+    assert repr(ds) == repr(Serializable.validate(ds))
 
     class Model(BaseModel):
         ds: Dataset

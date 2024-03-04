@@ -167,7 +167,7 @@ class DataArray(Serializable, xr.DataArray):
         For an xarray, this may involve unnecessarily writing and reading to disk;
         we avoid this by providing this function.
         """
-        return cls(da)
+        return cls(da, coords=da.coords, attrs=da.attrs, name=da.name)
 
     class Data(SerializedData):
         data: Union[AnnexDataArrayData,InlineDataArrayData]
@@ -189,7 +189,7 @@ class Dataset(Serializable, xr.Dataset):
     `.to_netcdf()` method.
     """
     @classmethod
-    def __scityping_from_base_type__(cls, da:xr.Dataset) -> "Dataset":
+    def __scityping_from_base_type__(cls, ds:xr.Dataset) -> "Dataset":
         """
         Convert a plain xr.Dataset into a scityping one.
         When this function is not available, scityping falls back to doing
@@ -197,7 +197,7 @@ class Dataset(Serializable, xr.Dataset):
         For an xarray, this may involve unnecessarily writing and reading to disk;
         we avoid this by providing this function.
         """
-        return cls(da)
+        return cls(ds, coords=ds.coords, attrs=ds.attrs)
 
     class Data(SerializedData):
         data: Union[AnnexDatasetData,InlineDatasetData]
