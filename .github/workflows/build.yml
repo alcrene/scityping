@@ -19,12 +19,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # Get the latest commit with a semver tag
+      # This allows re-running the build job even after further unclean commits were made:
+      # builds will always be for at least a tagged version, allowing them to be
+      # pushed to PyPI.
+      # Unfortunately, `semver_only: true` excludes tags with suffixes, like v1.0.0-rc.3,
+      # so it would prevent from building release candidate versions.
+      # By setting to `false`, we make the assumption that tags are only used on
+      # commits which correspond to releases.
+      - uses: actions-ecosystem/action-get-latest-tag@v1
+        id: get-latest-tag
+        with:
+          semver_only: false
+
+      # https://stackoverflow.com/a/73904531
+      - name: Checkout latest tagged release
+        run: |
+          echo "Restoring state to the commit tagged '${{ steps.get-latest-tag.outputs.tag }}'"
+          git checkout "tags/${{ steps.get-latest-tag.outputs.tag }}"
+
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.8"
 
@@ -43,7 +62,7 @@ jobs:
           --wheel
           --outdir dist/
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: release-build
           path: dist/
