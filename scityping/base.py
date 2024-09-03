@@ -202,8 +202,8 @@ class Serializable:
        `~scityping.scipy.Distribution`) *don't* return instances of themselves
        when validating values, instead returning clean, unmodified base types
        (the stated examples return `numpy.ndarray` and `scipy.stats.<rv_frozen>`
-       respectively). For these types, pickling if and only if the base types
-       supports it.
+       respectively). For these types, they can be pickled if and only if the
+       base types supports it.
 
        Among the types defined in this package,
        `~scityping.functions.PureFunction` and its subclasses is probably the
@@ -218,7 +218,7 @@ class Serializable:
     @property
     @classmethod
     @abc.abstractmethod
-    def Data(self):
+    def Data(cls):
         """
         Any subclass of `Serializable` must define a nested class `Data`,
         which itself defines a class method `encode`.

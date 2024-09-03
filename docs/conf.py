@@ -32,7 +32,7 @@ except Exception:
     version = "unknown"
 release = version
 this_year = datetime.date.today().year
-copyright = f"2022-{this_year}, Alexandre René"
+copyright = f"2022-{this_year}"
 
 
 # -- General configuration ---------------------------------------------------
