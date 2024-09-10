@@ -11,9 +11,9 @@ run-name: ${{ github.actor }} is publishing the latest release on TestPyPI
 on: workflow_dispatch
 jobs:
   pypi-publish:
-    name: Upload release to PyPI
+    name: Upload release to TestPyPI
     runs-on: ubuntu-latest
-    environment: release
+    environment: release-testpypi
     permissions:
       id-token: write
     steps:
@@ -27,5 +27,7 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R
 
-      - name: Publish package distributions PyPI
+      - name: Publish package distributions TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
