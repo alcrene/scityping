@@ -22,7 +22,7 @@ Types were designed and tested with Pydantic in mind, so they can be used as typ
 ```python
 from scityping.pydantic import BaseModel
 ```
-(Don’t worry: this is not a rewrite of `BaseModel`. It is just a small wrapper class which adds a hook for our extensible type machinery.)
+This is just a small wrapper class around `pydantic.BaseModel` which adds a hook for our extensible type machinery.
 
 Example usage:
 
@@ -76,10 +76,12 @@ This package is my [fifth](https://github.com/mackelab/mackelab-toolbox/blob/acc
 - The format should be plain text and, to the extent possible, human-readable. This further increases long-term reliability, since in the worst case, the file can be opened in a text editor and interpreted by a human.
 - It must be possible to associate a pair of serialization/deserialization routines to a type.
 - These routines must be recognized by [Pydantic](https://pydantic-docs.helpmanual.io/), since this is the serialization library I currently use.
-- It should be possible for imported librairies to use custom serializers, without worrying about the order of imports. Note that this is difficult with vanilla Pydantic, because the list of `json_encoders` is set when the class is defined. One can [work around](https://github.com/samuelcolvin/pydantic/issues/951#issuecomment-774297368) this by defining a global dictionary of JSON encoders, but the behaviour is still dependent on the order of imports, and is thus fragile.
-- It should be possible to associate custom serializers to already existing types. (E.g. add a serializer for `complex`.)
+- It should be possible for imported librairies to use custom serializers, without worrying about the order of imports. This was almost impossible to do with Pydantic v1.[^pydantic-v1-json-encoders] 
+- It should be possible to associate custom serializers to already existing types. (E.g. add a serializer for `complex`.)[^pydantic-custom-types]
 - It should be possible to use generic base classes in a model definition, while subclasses are preserved after deserialization. For example, in the snippet below this is *not* the case:
   ```python
+  from pydantic import BaseModel
+
   class Signal:
     ...
   class AMSignal(Signal):
@@ -99,6 +101,11 @@ This package is my [fifth](https://github.com/mackelab/mackelab-toolbox/blob/acc
   Since it is often the cases that the same computational pipeline can be applied to many different types, the ability to define classes in terms of only generic base types is extremely useful.
 
 The solution provided by this package satisfies all of these requirements.
+
+[^pydantic-v1-json-encoders]: This is because Pydantics set the list of serializers at class creation time. [A possible workaround](https://github.com/samuelcolvin/pydantic/issues/951#issuecomment-774297368) was to define a global dictionary of JSON encoders, but the behaviour still depends on the order of imports, and is thus fragile.
+I have not tested with v2 yet, but it should at least now provide the hooks needed to make this work.
+
+[^pydantic-custom-types]: Pydantic v2 now offers [similar functionality](https://docs.pydantic.dev/latest/concepts/types/#adding-validation-and-serialization).
 
 ## An extensible serialization hierarchy
 
@@ -206,11 +213,13 @@ For types serialized with Pydantic, this adds a single `isinstance` check for ea
 
 Serialization with `Serializable` is not as aggressively tested with regards to performance and is expected to be a slower.
 
-*De*serialization of `Serializable` types in general will be slower, although this should only be noticeable if deserialization is a big part of your application. In some cases it may even be faster: Pydantic fields with `Union` types execute a try-catch for each possible type, keeping the first successful result. Since `Serializable` includes the target type in serialized data, the correct data type is generally attempted first.
+*De*serialization of `Serializable` types in general will be slower, although this should only be noticeable if deserialization is a big part of your application. In some cases it may even be faster: Pydantic fields with `Union` types may fall back to a try-catch for each possible type, keeping the first successful result.[^pydantic-try-catch] Since `Serializable` includes the target type in serialized data, the correct data type is generally attempted first.
 
 In general, within scientific applications these performance considerations should not matter: data is typically serialized/deserialized only at the beginning/end of a computation, which is not where the speed bottlenecks usually are. 
 
 [^negligeable-comp-cost]: Unless *a lot* of builtin types are extended with serializers.
+
+[^pydantic-try-catch]: In Pydantic v1, this try-catch approach to `Union` types was always used. I believe in v2 there is an attempt to identify the correct type (see [“smart mode”](https://docs.pydantic.dev/latest/concepts/unions/#smart-mode)), but due to Pydantic’s data model (which doesn’t include the type in the serialized data), this may still lead to multiple deserialization calls.
 
 ## Running tests
 
