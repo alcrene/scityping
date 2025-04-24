@@ -15,8 +15,21 @@ class Complex(Serializable, complex):
    class Data:
        real: float
        imag: float
-       def encode(self, z): return z.real, z.imag
+       def encode(z): return z.real, z.imag
 ```
+:::{dropdown} More explicitely
+The above is shorthand for
+
+```python
+class Complex(Serializable, complex):
+   @dataclass
+   class Data:
+       real: float
+       imag: float
+       @classmethod
+       def encode(datacls, z): return datacls(z.real, z.imag)
+```
+:::
 
 By subclassing the type with a different name
 ---------------------------------------------
