@@ -17,8 +17,12 @@ class Complex(Serializable, complex):
        imag: float
        def encode(z): return z.real, z.imag
 ```
-````{dropdown} More explicitely
-The above is shorthand for
+
+````{admonition} *Scityping* shorthands
+:class: hint
+
+You may notice that the `encode` method above has no `self` argument.
+This is because *scityping* internally translates it to:
 
 ```python
 class Complex(Serializable, complex):
@@ -29,6 +33,15 @@ class Complex(Serializable, complex):
        @classmethod
        def encode(datacls, z): return datacls(z.real, z.imag)
 ```
+
+Sometimes using the more explicit form with `@classmethod` is useful.
+On the other hand, when the data types are very simple, reducing boilerplate
+can improve readability.
+
+Note also that it would make no sense to pass `self` to `encode`, since the `Data`
+object is not yet initialized. If it helps, you can think of `encode` as a
+combination of `__new__` and `__init__` methods.
+
 ````
 
 By subclassing the type with a different name
@@ -42,7 +55,7 @@ class NPGenerator(Serializable, np.random.Generator):
    @dataclass
    class Data:
        state: dict
-       def encode(self, rng): return rng.bit_generator.state
+       def encode(rng): return rng.bit_generator.state
        def decode(data):
            bg = getattr(np.random, data.state["bit_generator"])()
            bg.state = data.state
