@@ -55,6 +55,28 @@ def get_dtype(T: Any) -> np.dtype:
         T = np.dtype(T).type
     return np.dtype(T)
 
+def can_cast(v: int|float|complex|bool|Any, nptype) -> bool:
+    """
+    Return `True` if `v` can cast to the NumPy type `nptype`.
+    This is a wrapper around `numpy.can_cast`, which since NumPy v2 does not
+    support scalar values.
+    If `v` is a scalar, it converts it to its minimum scalar type then calls 
+    `np.can_cast`.
+    """
+    if np.isscalar(v):
+        T = np.min_scalar_type(v).type
+        if np.issubdtype(T, np.unsignedinteger) and not np.issubdtype(nptype, np.unsignedinteger):
+            # min_scalar_type will return an unsigned type if it can
+            # This can cause a false negative if the target type is actually signed,
+            # since uint8 does not cast to int8
+            signedT = {np.uint8:np.int8,   np.uint16:np.int16,
+                       np.uint32:np.int32, np.uint64:np.int64}[T]
+            if v <= np.iinfo(signedT).max:
+                T = signedT
+        v = T  # Replace value by its NumPy type, so we can call can_cast
+    return np.can_cast(v, nptype)
+
+
 # ###############
 # DType
 
@@ -222,14 +244,14 @@ class _NPValueType(Serializable, np.generic):
 
         # Don't cast unless necessary
         # np.issubdtype allows specifying abstract dtypes like 'number', 'floating'
-        # np.generic ensures isubdtype doesn't let through non-numpy types
+        # np.generic ensures issubdtype doesn't let through non-numpy types
         # np.can_cast doesn’t allow strings as the first argument (NumPy strings are fine)
         # (like 'float'), or objects which wrap numpy types (like 'ndarray').
         if (isinstance(value, np.generic)
             and np.issubdtype(type(value), cls.nptype)):
             return value
         elif (isinstance(value, str)
-              or np.can_cast(value, cls.nptype)
+              or can_cast(value, cls.nptype)
               or np.issubdtype(getattr(value, 'dtype', np.dtype('O')), np.dtype(str))):
             # Exception for strings, as stated above
             nptype = infer_numpy_type_to_cast(cls.nptype, value)
@@ -459,7 +481,7 @@ class _ArrayType(Serializable, np.ndarray):
             # Issubdtype allows specifying abstract numpy types like 'number', 'floating'
             if cls.nptype is None or np.issubdtype(value.dtype, cls.nptype):
                 result = value
-            elif np.can_cast(value, cls.nptype):
+            elif can_cast(value, cls.nptype):
                 nptype = infer_numpy_type_to_cast(cls.nptype, value)
                 result = value.astype(nptype)
             else:
@@ -490,7 +512,7 @@ class _ArrayType(Serializable, np.ndarray):
             else:
                 # Inferring the nptype first avoids warnings if cls.nptype is an abstract type, like np.inexact
                 nptype = infer_numpy_type_to_cast(cls.nptype, result)
-                if np.can_cast(result, nptype, casting="safe"):
+                if can_cast(result, nptype, casting="safe"):
                     result = result.astype(nptype)
                 else:
                     raise TypeError(f"Cannot safely cast '{field.name}' (dtype:  "

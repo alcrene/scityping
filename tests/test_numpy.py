@@ -99,7 +99,7 @@ def test_numpy(caplog):
         def set_γ(cls, v, values):
             a, b, β = (values.get(x, None) for x in ('a', 'b', 'β'))
             if all((a, b, β)):
-                return β * np.array([1, b/a], dtype='float32')
+                return np.float32(β) * np.array([1, b/a], dtype='float32')
         def integrate(self, x0, T, y0=0):
             x = w*x0; y = w*y0
             γ = self.γ; dt = self.dt
@@ -122,7 +122,7 @@ def test_numpy(caplog):
         largeb = 57389780668102097303  # int(''.join((str(i) for i in np.random.randint(10, size=20))))
         m2_np = Model2(a=-0.5, b=largeb, w=w16, dt=0.01)
     m2_np = Model2(a=-0.5, b=-0.1, w=w16, dt=0.01)
-    assert repr(m2_np) == "Model2(a=-0.5, dt=0.01, b=-0.1, w=array([0.25, 0.75], dtype=float32))"
+    assert repr(m2_np) == "Model2(a=-0.5, dt=0.01, b=np.float64(-0.1), w=array([0.25, 0.75], dtype=float32))"
     assert m2_np.b.dtype is np.dtype('float64')
     # Test conversion from ints and list
     m2_nplist = Model2(a=-0.5, b=np.float32(-0.1), w=[np.float32(0.25), np.float32(0.75)], dt=0.01)
