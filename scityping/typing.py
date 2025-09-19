@@ -4,7 +4,7 @@ Pydantic is not installed.
 """
 
 try:
-    from pydantic import StrictStr, StrictBytes, StrictInt, StrictFloat, StrictBool
+    from pydantic.v1 import StrictStr, StrictBytes, StrictInt, StrictFloat, StrictBool
 except ModuleNotFoundError:
     StrictStr = str
     StrictBytes = bytes

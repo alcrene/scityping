@@ -4,8 +4,8 @@ import pytest
 
 import numpy as np
 import pint
-from pydantic import validator
-from pydantic import ValidationError
+from pydantic.v1 import validator
+from pydantic.v1 import ValidationError
 from scityping.pydantic import BaseModel, dataclass
 
 from typing import List, Tuple
@@ -122,7 +122,8 @@ def test_numpy(caplog):
         largeb = 57389780668102097303  # int(''.join((str(i) for i in np.random.randint(10, size=20))))
         m2_np = Model2(a=-0.5, b=largeb, w=w16, dt=0.01)
     m2_np = Model2(a=-0.5, b=-0.1, w=w16, dt=0.01)
-    assert repr(m2_np) == "Model2(a=-0.5, dt=0.01, b=np.float64(-0.1), w=array([0.25, 0.75], dtype=float32))"
+    assert repr(m2_np) in {"Model2(a=-0.5, dt=0.01, b=np.float64(-0.1), w=array([0.25, 0.75], dtype=float32))",
+                           "Model2(a=-0.5, dt=0.01, b=-0.1, w=array([0.25, 0.75], dtype=float32))"}  # Older version of NumPy use this form
     assert m2_np.b.dtype is np.dtype('float64')
     # Test conversion from ints and list
     m2_nplist = Model2(a=-0.5, b=np.float32(-0.1), w=[np.float32(0.25), np.float32(0.75)], dt=0.01)

@@ -4,8 +4,8 @@ import pytest
 
 import numpy as np
 import pint
-from pydantic import validator
-from pydantic import ValidationError
+from pydantic.v1 import validator
+from pydantic.v1 import ValidationError
 from scityping.pydantic import BaseModel, dataclass
 
 from typing import List, Tuple

@@ -12,12 +12,12 @@ from typing import TYPE_CHECKING, Any, Type
 from functools import partial
 from dataclasses import is_dataclass
 from importlib.metadata import version
-from pydantic import BaseModel as PydanticBaseModel
-from pydantic.main import (ModelMetaclass as PydanticModelMetaclass,
+from pydantic.v1 import BaseModel as PydanticBaseModel
+from pydantic.v1.main import (ModelMetaclass as PydanticModelMetaclass,
                            ValidationError as PydanticValidationError)
-from pydantic.generics import GenericModel as PydanticGenericModel
-from pydantic.error_wrappers import display_errors
-from pydantic.dataclasses import (dataclass as pydantic_dataclass,
+from pydantic.v1.generics import GenericModel as PydanticGenericModel
+from pydantic.v1.error_wrappers import display_errors
+from pydantic.v1.dataclasses import (dataclass as pydantic_dataclass,
                                   _validate_dataclass as _pydantic_validate_dataclass)
 from .base import Serializable, json_like, Dataclass
 from .json import scityping_encoder

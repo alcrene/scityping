@@ -4,7 +4,7 @@ These are tests for that functionality.
 """
 from dataclasses import dataclass
 from typing import ClassVar
-from pydantic import BaseModel, validator
+from pydantic.v1 import BaseModel, validator
 from scityping import Serializable, Range
 
 def test_autocontainer_plain():

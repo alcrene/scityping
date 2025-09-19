@@ -26,8 +26,8 @@ except:
         pass
 
 try:
-    from pydantic import BaseModel
-    from pydantic.dataclasses import dataclass as plain_or_pydantic_dataclass  # Used for autogenerating the nested Data container
+    from pydantic.v1 import BaseModel
+    from pydantic.v1.dataclasses import dataclass as plain_or_pydantic_dataclass  # Used for autogenerating the nested Data container
 except ModuleNotFoundError:
     # BaseModel is used only for isinstance checks – if pydantic is not loaded,
     # those tests are False by default. Therefore instantiating a dummy class suffices

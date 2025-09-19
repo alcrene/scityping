@@ -28,7 +28,7 @@ classifiers = [
     "Typing :: Typed"
 ]
 dependencies = [
-    "pydantic<2",
+    "pydantic>=2",
     "valconfig"
 ]
 dynamic = ["version"]

@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import ClassVar, Union
-from pydantic import Field, validator
+from pydantic.v1 import Field, validator
 from valconfig import ValConfig
 
 # These are added to the namespace when deserializing a function

@@ -5,7 +5,7 @@ from .base import ABCSerializable, Serializable, Dataclass
 from .functions import serialize_function
 
 try:
-    from pydantic.main import ValidationError
+    from pydantic.v1.main import ValidationError
 except ModuleNotFoundError:
     # If pydantic can’t be imported, it is fine to create a dummy class which
     # will never match

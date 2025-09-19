@@ -18,7 +18,7 @@ from .config import config
 from .utils import LazyDict, get_type_key
 
 try:
-    from pydantic import StrictInt, StrictFloat
+    from pydantic.v1 import StrictInt, StrictFloat
 except ModuleNotFoundError:
     StrictInt, StrictFloat = int, float
 
@@ -293,7 +293,7 @@ class NPValue(_NPValueType, metaclass=_NPValueMeta):
 
     Example
     -------
-    >>> from pydantic.dataclasses import dataclass
+    >>> from pydantic.v1.dataclasses import dataclass
     >>> from scityping.numpy import NPValue
     >>>
     >>> @dataclass
@@ -574,7 +574,7 @@ class Array(_ArrayType, metaclass=_ArrayMeta):
 
     Example
     -------
-    >>> from pydantic.dataclasses import dataclass
+    >>> from pydantic.v1.dataclasses import dataclass
     >>> from scityping import Array
     >>> import blosc  # Without this, Array would fall back to zlib for compression
     >>>

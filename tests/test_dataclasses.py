@@ -5,7 +5,7 @@ try:
 except ImportError:
     from dataclasses import dataclass, field
     KW_ONLY = None
-from pydantic import ValidationError
+from pydantic.v1 import ValidationError
 from scityping import Serializable, Slice, Dataclass, config
 from scityping.base import deep_reduce
 from scityping.pydantic import BaseModel, dataclass as pydataclass

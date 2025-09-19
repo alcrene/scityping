@@ -2,7 +2,7 @@ import pytest
 from functools import partial
 import operator
 import numpy as np
-from pydantic import ValidationError
+from pydantic.v1 import ValidationError
 import scityping
 from scityping.base import Serializable
 from scityping.utils import UnsafeDeserializationError

@@ -38,7 +38,7 @@ in the module providing the extension. Otherwise Pydantic will complain about
 unprepared types still being a `ForwardRef`::
 
     from scipy import stats
-    from pydantic.dataclasses import dataclass
+    from pydantic.v1.dataclasses import dataclass
 
     from scityping.scipy import Optional, Dict, Tuple, Array,  RVArg, RNGState   # Required to resolve forward refs
     from scityping.scipy import Union, NoneType, Covariance  # Required to resolve forward refs for multivariate distributions
