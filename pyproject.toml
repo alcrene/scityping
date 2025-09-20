@@ -29,7 +29,7 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2",
-    "valconfig"
+    "valconfig>=1.0.0-rc.1"
 ]
 dynamic = ["version"]
 

@@ -1,11 +1,13 @@
 from pathlib import Path
-from typing import ClassVar, Union
-from pydantic.v1 import Field, validator
+from collections.abc import Mapping
+from typing import Any
+from pydantic import field_validator, Field
 from valconfig import ValConfig
 
 # These are added to the namespace when deserializing a function
 import numpy as np
 import math
+ModuleType = type(math)
 
 class Config(ValConfig):
     """
@@ -22,6 +24,10 @@ class Config(ValConfig):
        safe, and allow `scityping` to proceed.
        Packages may add themselves (technically any package) to this list, to
        allow deserialization of their own types.
+    default_function_deserialization_namespace:
+       Namespace used when deserializing functions, if no other namespace
+       is provided. The default value is
+       ``{'__builtins__': __builtins__, 'np': np, 'math': math}``
     include_summaries: If True (default), certain types which export binary
        blobs may also include a string representation, to help human inspecting
        the serialized data. Setting to False may be useful if the result is
@@ -66,29 +72,25 @@ class Config(ValConfig):
     singleton instance – which is why we reuse `config` for `annex_files`.
 
     """
-    __default_config_path__: ClassVar=Path(__file__).parent/"defaults.cfg"
-
-    trust_all_inputs: bool=False
-    safe_packages: set={"__main__", "scityping"}
-    default_namespace: dict=Field(
-        default_factory=lambda: {'__builtins__': __builtins__,
-                                 'np': np,
-                                 'math': math})
+    trust_all_inputs : bool=False
+    safe_packages    : set={"__main__", "scityping"}
+    default_function_deserialization_namespace: dict[str, ModuleType|Mapping] = \
+        Field(default_factory=lambda: {'__builtins__': __builtins__, 'np': np, 'math': math})
+        # NB: Using default_factory avoids Pydantic making a deepcopy of the value
 
     include_summaries: bool=True
-    annex_directory: Path|None=None
+    annex_directory  : Path|None=None
 
     # Global state variables:
     _annex_files: list=[]
 
-    # def __setattr__(self, attr, value):
-    #     if attr == "annex_directory" and self.annex_directory != value:
-    #         self._annex_files.clear()
-    #     super().__setattr__(attr, value)
+    # TODO?: A slightly annoying thing is that when we print the Config,
+    #       the  __builtins__ dict (b/c it is a dict and not a module)
+    #       gets printed full, drowning everything else.
+    #       Ideally we would replace it with a short string like `<builtins>`
 
     @property
     def annex_files(self):
         return self._annex_files[:]  # Make a copy so the original stays read-only
-
 
 config = Config()

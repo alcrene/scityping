@@ -242,7 +242,7 @@ class Distribution(Serializable):
         if len(data_types) == 0:
             raise RuntimeError("No subclass of `Distribution.Data` seems to recognize "
                                f"the distribution type '{dist_name}'.\nData classes "
-                               f"checked: {T.Data for T in Distribution._registry.values()}")
+                               f"checked: {[T.Data for T in Distribution._registry.values()]}")
         elif len(data_types) > 1:
             raise RuntimeError(f"Multiple `Data` classes recognize '{dist_name}': "
                                f"{data_types}")

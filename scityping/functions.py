@@ -751,7 +751,7 @@ def deserialize_function(
     .. note:: A few namespaces are added automatically to globals; by default,
        these are ``__builtins__``, ``np`` and ``math``. This can
        be changed by modifying the module variable
-       `~scityping.config.default_namespace`.
+       `~scityping.config.default_function_deserialization_namespace`.
 
     .. note:: Both `locals` and `globals` will be mutated by the call (in
        particular, the namespaces mentioned above are added to `globals` if not
@@ -808,15 +808,15 @@ def _deserialize_def(s, globals, locals):
     fname = s[4:s.index('(')].strip() # Remove 'def', anything after the first '(', and then any extra whitespace
     s = "\n".join(chain(decorator_lines, [s]))
     if globals is None:
-        globals = config.default_namespace.copy()
+        globals = config.default_function_deserialization_namespace.copy()
         exec(s, globals)
         f = globals[fname]
     elif locals is None:
-        globals = {**config.default_namespace, **globals}
+        globals = {**config.default_function_deserialization_namespace, **globals}
         exec(s, globals)
         f = globals[fname]
     else:
-        globals = {**config.default_namespace, **globals}
+        globals = {**config.default_function_deserialization_namespace, **globals}
         exec(s, globals, locals)  # Adds the function to `locals` dict
         f = locals[fname]
     return f
@@ -831,7 +831,7 @@ def _deserialize_lambda(s, globals, locals):
     else:
         assert "->" not in s
     if globals is None:
-        globals = config.default_namespace.copy()
+        globals = config.default_function_deserialization_namespace.copy()
     else:
-        globals = {**config.default_namespace, **globals}
+        globals = {**config.default_function_deserialization_namespace, **globals}
     return eval(s, globals, locals)
