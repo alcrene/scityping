@@ -4,6 +4,7 @@ import abc
 import contextlib
 import logging
 import textwrap
+import pprint
 import inspect
 from typing import get_type_hints, ClassVar, Union, Type, Any, Literal, List, Tuple
 from collections import ChainMap
@@ -292,7 +293,8 @@ class Serializable:
                                                                   obj=obj))
 
                 elif cls.Data is Serializable.Data:
-                    # The base is not useful: Create a new one with only the current annotations as fields
+                    # No nested `Data` class has been specified at all; create one from the annotations.
+                    # Note that the base is not useful: Create a new one with only the current annotations as fields
                     @plain_or_pydantic_dataclass
                     class Data:
                         __annotations__ = annotations
@@ -310,6 +312,12 @@ class Serializable:
             if Data is not None:
                 cls.Data = Data
                 Data_is_from_parent = False
+
+        elif not (isinstance(cls.Data, BaseModel) or is_dataclass(cls.Data)):
+            ## There is a nested Data class, but it is neither a BaseModel nor a subclass
+            ## => Wrap it with a dataclass
+            raise NotImplementedError("Automatically wrapping nested `Data` classes is not yet implemented. "
+                                      f"Please make {cls.Data} either a dataclass or a Pydantic BaseModel.")
             
         ## Reproduce ABC functionality, since we don't subclass ABC ##
         if not inspect.isabstract(cls):
@@ -575,7 +583,8 @@ class Serializable:
                            "are only registered when the corresponding module in "
                            "scityping is imported.\n"
                            f"Attempted to serialize using: {cls}.reduce\n"
-                           f"This serializes knows how to serialize the following types: {cls._registry.keys()}")
+                           "This serializer knows how to serialize the following types:\n"
+                           f"{pprint.pformat(list(cls._registry))}")
 
         # Call Data.encode, passing any parameters from kwargs that match a parameter in Data.encode.
         if kwargs:
